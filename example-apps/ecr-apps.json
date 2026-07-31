@@ -1,0 +1,14 @@
+{
+  "apps": [
+    {
+      "context": "backend/YoutubeLiveApp",
+      "repository": "dvn-workshop/production/backend",
+      "dockerfile": "Dockerfile"
+    },
+    {
+      "context": "frontend/youtube-live-app",
+      "repository": "dvn-workshop/production/frontend",
+      "dockerfile": "Dockerfile"
+    }
+  ]
+}

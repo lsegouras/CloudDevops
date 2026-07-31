@@ -1,0 +1,24 @@
+# Artefatos de build
+bin/
+obj/
+publish/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Controle de versão / IDE
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+*.user
+
+# SO
+.DS_Store
+
+# Config local / segredos — não devem ir para a imagem
+appsettings.Development.json
+*.env
+.env

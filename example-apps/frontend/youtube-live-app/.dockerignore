@@ -1,0 +1,25 @@
+# Dependências e artefatos de build (serão reconstruídos dentro da imagem)
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Controle de versão / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+*.user
+
+# SO
+.DS_Store
+
+# Config local / segredos — não devem ir para o contexto de build
+.env
+.env*.local
+npm-debug.log*
