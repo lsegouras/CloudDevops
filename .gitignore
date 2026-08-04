@@ -1,6 +1,10 @@
 # Created by https://www.toptal.com/developers/gitignore/api/terraform,dotnetcore,node
 # Edit at https://www.toptal.com/developers/gitignore?templates=terraform,dotnetcore,node
 
+### AWS ###
+# Credenciais locais - NUNCA versionar
+.aws/
+
 ### DotnetCore ###
 # .NET Core build folders
 bin/
