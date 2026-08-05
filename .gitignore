@@ -5,6 +5,12 @@
 # Credenciais locais - NUNCA versionar
 .aws/
 
+### Claude Code ###
+# Definicoes de agente e settings de equipe sao versionados.
+# Memoria de agente e settings locais, nao.
+.claude/agent-memory/
+.claude/settings.local.json
+
 ### DotnetCore ###
 # .NET Core build folders
 bin/
