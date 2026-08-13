@@ -179,6 +179,12 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 
+# EXCECAO (ADR-0001 §8): o `terraform.tfvars` de cada root de project-terraform/ E
+# versionado — contem apenas valores concretos NAO-SECRETOS (CIDRs, AZs, nomes, flags
+# de custo). A regra `*.tfvars` acima continua valendo para qualquer outro .tfvars,
+# incluindo `*.auto.tfvars` e arquivos de credencial.
+!project-terraform/**/terraform.tfvars
+
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in
 override.tf

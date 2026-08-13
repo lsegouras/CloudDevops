@@ -1,0 +1,551 @@
+# ADR-0001 — Log de implementação
+
+Arquivo append-only. Nunca reescreva entradas anteriores.
+
+---
+
+## 2026-08-12 — Etapa 1 de 5: raiz Terraform e AWS Budget
+
+**Executor:** devops-engineer · **Branch:** `feat/adr-0001-networking-stack`
+**ADR:** `docs/adr/ADR-0001-arquitetura-de-rede-aws.md` — status `Aprovado` em 2026-08-12 por Laura.
+**Escopo desta etapa:** passo 1 do §7 (AWS Budget) mais o esqueleto do root Terraform. Nenhum recurso de rede.
+
+### Feito
+
+Diretório `project-terraform/01-networking-stack/`:
+
+| Arquivo | Conteúdo |
+| --- | --- |
+| `versions.tf` | `required_version = "~> 1.13"`; `hashicorp/aws ~> 6.58`. |
+| `providers.tf` | `provider "aws"` com `region`, `profile` e `default_tags` com as 6 tags obrigatórias do §8. `Name` fica de fora, por recurso. |
+| `backend.tf` | Backend `s3`, key `prd/network/terraform.tfstate`, `encrypt = true`, `use_lockfile = true`. Sem `dynamodb_table`. |
+| `variables.tf` | 21 variáveis, todas com `description`; ordem de chaves `description, type, default, validation`; `nullable = false` em todas; plural em `list(...)`. |
+| `terraform.tfvars` | Valores concretos de `prd`. Nenhum segredo. |
+| `budget.tf` | `aws_budgets_budget.this` — US$ 5,00, período customizado, `cost_filter` por `TagKeyValue`, 4 notificações. |
+| `main.tf` | `module "network"` apontando para `./modules/network`. |
+| `outputs.tf` | Os 9 outputs exigidos pelo §14 mais `budget_name`. |
+| `.terraform.lock.hcl` | `hashicorp/aws 6.59.0`, com checksums para `windows_amd64`, `linux_amd64` e `darwin_arm64`. |
+
+Fora do diretório: `.gitignore` ganhou a exceção `!project-terraform/**/terraform.tfvars`. Ver Divergências.
+
+**Decisões de implementação dentro do que o ADR já decidiu:**
+
+- `budget_time_unit = "ANNUALLY"`. O AWS Budgets não tem `time_unit` "CUSTOM"; o período customizado se expressa por `time_period_start`/`time_period_end`. `MONTHLY` resetaria o teto todo mês e transformaria os US$ 5,00 num limite mensal, violando C1. Com `ANNUALLY` mais as datas, o curso inteiro cabe num único período.
+- As 4 notificações foram escritas como blocos explícitos, não via `dynamic`. Os thresholds 40/60/80 `ACTUAL` e 100 `FORECASTED` são a decisão do §11.5, não configuração de ambiente; explícito é auditável linha a linha contra o ADR.
+- `outputs.tf` foi escrito completo, não como esqueleto vazio. Os outputs definem o contrato que `modules/network` precisa cumprir nas etapas 2 a 4 — são a especificação do módulo, não um reflexo dele.
+
+**Consultas ao MCP `terraform` (o ADR §16 registrou que o MCP não estava disponível quando foi escrito; nesta sessão estava):**
+
+- `get_latest_provider_version(hashicorp/aws)` → **6.59.0**. O pin `~> 6.58` do ADR admite 6.59.0 (`>= 6.58.0, < 7.0.0`), então o ADR não precisa mudar.
+- `get_provider_details(aws_budgets_budget @ 6.59.0)` → confirmados `budget_type`, `time_unit`, `limit_amount`, `limit_unit`, `time_period_start`/`_end` (formato `AAAA-MM-DD_HH:MM`), bloco `cost_filter` (`name` = `TagKeyValue`, valores no formato `TagKey$TagValue` com prefixo `user:` para tags de usuário) e bloco `notification` (`comparison_operator`, `threshold`, `threshold_type`, `notification_type`, `subscriber_email_addresses`). Nenhum argumento foi escrito de memória.
+
+### Validado
+
+| Validação | Resultado |
+| --- | --- |
+| `terraform version` | v1.15.8 — satisfaz `~> 1.13`. |
+| `terraform fmt -check` | **exit 0**, limpo. |
+| `terraform init -backend=false` (pasta real) | **Falha esperada:** `Unreadable module directory ... modules\network`. É a etapa 2. |
+| `terraform init -backend=false` (cópia isolada, sem `main.tf`/`outputs.tf`) | **exit 0.** Provider resolvido: `hashicorp/aws v6.59.0`. |
+| `terraform validate` (cópia isolada) | **exit 0** — "Success! The configuration is valid." |
+| `tflint` 0.64.0 (pasta real) | **Falha esperada:** módulo `network` não encontrado. |
+| `tflint` 0.64.0 (cópia isolada) | 8 `terraform_unused_declarations`. **Todos artefato do setup de validação** — as 8 variáveis são consumidas por `main.tf`, removido da cópia. Zero achado real. |
+| `checkov` 3.3.10 (pasta real) | **Passed 1, Failed 0, Skipped 0.** Único check: `CKV_AWS_41` — "Ensure no hard coded AWS access key and secret key exists in provider" — **PASSED**. Nenhuma supressão foi necessária nesta etapa. |
+
+Superfície de segurança do checkov ainda é mínima: nesta etapa só existem o provider e o budget. Os checks que o §7 passo 10 antecipa vão aparecer quando `modules/network` existir.
+
+**Nada foi aplicado na AWS.** Nenhum `apply`, nenhum comando mutante. A única chamada à AWS foi `sts get-caller-identity`, leitura pura, para compor o nome do bucket do backend.
+
+### Pendente
+
+| # | Item | Bloqueia |
+| --- | --- | --- |
+| 1 | **Bucket de state não existe** (§7 passo 2). `terraform init` com backend vai falhar. | `init` real, e portanto o `apply` do budget. |
+| 2 | **Profile `app_cloud_devops` com sessão expirada.** `aws sts get-caller-identity --profile app_cloud_devops` retorna `Your session has expired`. Pré-requisito 3 do handoff **não satisfeito**. | Qualquer `plan` ou `apply`. |
+| 3 | **Datas do curso não confirmadas** (pré-requisito 6, bloqueante). Assumidos `2026-08-01_00:00` e `2026-12-03_00:00`. | Correção do `terraform.tfvars` antes do apply. |
+| 4 | **Valor da tag `Owner` não confirmado** (pré-requisito 9, não bloqueante). Assumido `laura`. | Nada. Tag é trivial de corrigir. |
+| 5 | **P8 e P9 sem resposta do professor** (pré-requisito 2, bloqueante pelo handoff). | Decisão de escopo, não o código. |
+| 6 | **Cost Allocation Tag `CostCenter` não ativada** no console de Billing. Passo manual; leva até 24 h. | O `cost_filter` do budget fica cego até lá. |
+| 7 | **Assinatura de e-mail do budget** precisa ser confirmada após o apply. | Os alertas não chegam sem isso. |
+| 8 | `modules/network/` inteiro — etapas 2 a 4. | Etapas seguintes. |
+
+### Divergências
+
+Voltam para o `cloud-devops-architect`. Não editei o ADR.
+
+1. **Layout de diretórios.** A usuária determinou `project-terraform/01-networking-stack/` como a raiz Terraform, substituindo `envs/prd/` do §8. A pasta numerada **é** o root; o módulo vai em `01-networking-stack/modules/network/`, não em `project-terraform/modules/network/`. Consequência: o `source` do módulo é `./modules/network`, não `../../modules/network`. Determinação da usuária, superior ao ADR. **Sugiro atualizar o §8.**
+
+2. **`.gitignore` versus §8.** O `.gitignore` do repositório traz `*.tfvars` do template toptal, o que impediria o `terraform.tfvars` de ser versionado — e o §8 o exige commitado. Adicionei `!project-terraform/**/terraform.tfvars`, escopada: qualquer outro `.tfvars`, inclusive `*.auto.tfvars`, continua ignorado. Alteração fora de `01-networking-stack/`, registrada aqui por transparência.
+
+3. **`time_unit` do budget.** O §11.5 pede "cost budget de período customizado" sem nomear o `time_unit`. A API não tem valor "CUSTOM". Implementado como `ANNUALLY` mais `time_period_start`/`_end`. **Sugiro que o §11.5 diga isso explicitamente**, porque `MONTHLY` é a leitura intuitiva e transformaria o teto do curso num teto mensal.
+
+4. **Identidade da conta.** O §16 e o C4 falam do profile `app_cloud_devops`. O profile local existe mas está com sessão expirada. A identidade efetiva obtida via MCP `aws-mcp` é um **usuário IAM com nome diferente do que o ADR descreve**, na conta esperada. Não é bloqueio de código, mas o pré-requisito 3 do handoff não está satisfeito e o §9 pode estar descrevendo um principal que não é o que será usado. **Vale o arquiteto confirmar qual principal é o correto.**
+
+5. **MCP `terraform` disponível.** O §16 declara que o MCP não estava acessível e que as versões vieram da API pública do Registry. Nesta sessão o MCP respondeu e **confirmou os dados** — `6.59.0` como última versão, dentro do pin. A ressalva do §16 pode ser removida na próxima revisão do ADR.
+
+### Sugestões
+
+Identificadas e **não implementadas**, por estarem fora do escopo desta etapa.
+
+1. **`.tflint.hcl` no root do stack**, habilitando o ruleset `aws`. O ruleset bundled só cobre regras de linguagem; o plugin AWS pega argumento inválido e tipo de instância inexistente — exatamente a classe de erro mais cara nas etapas 2 a 4.
+2. **`terraform.tfvars` com as datas do budget** poderia virar `budget.auto.tfvars` separado, para que a confirmação do professor mude um arquivo só. Marginal; não vale antes das datas serem conhecidas.
+3. **Bucket de state via bootstrap versionado.** O §7 passo 2 o cria out-of-band, à mão. Um root `00-bootstrap/` com state local commitado deixaria o bucket rastreável. Muda a estrutura decidida no §8, portanto é decisão do arquiteto.
+4. **Verificação diária do §11.5 como script versionado** em vez de comandos soltos no ADR. Reduz a chance de o passo ser pulado, que é a mitigação central de R0.
+
+### Risco residual
+
+1. 🔴 **As datas do budget são presunção minha, não decisão humana.** Se o curso começou antes de `2026-08-01`, o budget não enxerga o gasto anterior; se vai além de `2026-12-03`, para de vigiar antes do fim. O arquivo marca isso em maiúsculas, mas o risco só some com a resposta do professor.
+2. 🟠 **A proteção de custo depende de dois passos manuais** — ativar a Cost Allocation Tag e confirmar a assinatura de e-mail. Nenhum dos dois é verificável por `terraform plan`. Um budget aplicado com os dois pendentes **parece** proteção e não é. Esse é o cenário exato que o §14 chama de "proteção ilusória".
+3. 🟠 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`, e eu segui o ADR. Consequência: não existe `dev` nem `staging` onde errar barato. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita, sem exceção.
+4. 🟡 **`main.tf` e `outputs.tf` estão referenciando um módulo que não existe.** O `init` falha até a etapa 2 terminar. É intencional e foi acordado, mas deixa a branch num estado que não passa em CI, caso exista CI antes da etapa 4.
+5. 🟡 **O lock file foi gerado num diretório de trabalho isolado** e copiado, porque o `init` na pasta real não completa sem o módulo. O conteúdo é função apenas do `required_providers`, que é idêntico, mas o arquivo será legitimamente regravado no primeiro `init` completo da etapa 3.
+
+### Corpo do PR — para colar no GitHub
+
+> `gh` **está** instalado neste ambiente (`C:\Program Files\GitHub CLI\gh.exe`), ao contrário do que a configuração do agente presume. Nenhum PR foi aberto: a entrega é 1 de 5 etapas e o PR pertence ao §7 passo 16.
+
+```markdown
+## ADR-0001 — Arquitetura de rede AWS (etapa 1 de 5)
+
+Implementa: docs/adr/ADR-0001-arquitetura-de-rede-aws.md · Etapas: 1 de 5
+
+### O que muda
+
+Cria a raiz Terraform em `project-terraform/01-networking-stack/` — versions, providers
+com as 6 tags obrigatórias, backend S3 com locking nativo, variáveis e tfvars de `prd` —
+e o AWS Budget de US$ 5,00 com os 4 alertas do §11.5, que o §7 exige antes de qualquer
+outro recurso. Nenhum recurso de rede: `modules/network/` é etapa 2. Nada foi aplicado.
+
+### Plan
+
+Não executado. O bucket de state não existe e `modules/network` também não, então
+`terraform init` não completa. Validação possível hoje: `fmt -check` limpo,
+`validate` limpo na configuração sem a chamada de módulo, `checkov` 1 passed / 0 failed.
+
+Quando o plan for possível, o esperado é **1 to add, 0 to change, 0 to destroy**
+(`aws_budgets_budget.this`). Nenhum recurso tarifado — o budget custa US$ 0,00.
+
+### Ambientes
+
+- [ ] production (`prd`) — único ambiente do ADR. Não aplicado.
+
+### Critérios de aceite (ADR §14)
+
+- [x] `terraform fmt -check` limpo — exit 0
+- [x] `required_version = "~> 1.13"`; provider AWS `~> 6.58` — resolvido em 6.59.0
+- [x] `.terraform.lock.hcl` commitado — windows_amd64, linux_amd64, darwin_arm64
+- [x] `enable_nat_gateway` e `enable_flow_logs` com `default = false` e a tarifa na `description`
+- [x] `backend "s3"` e `provider "aws"` somente no root
+- [x] As 6 tags obrigatórias via `default_tags`
+- [x] `checkov` executado — 1 passed, 0 failed, nenhuma supressão necessária
+- [~] `terraform validate` e `tflint` — limpos na configuração sem a chamada de módulo;
+      falham na pasta real por `modules/network` ausente (etapa 2)
+- [ ] Budget existe na conta com as 4 notificações e assinatura confirmada — **não aplicado**
+- [ ] Cost Allocation Tag `CostCenter` ativada no console — **passo manual pendente**
+- [ ] Demais critérios de Infraestrutura e Validação funcional — etapas 2 a 5
+
+### Segurança
+
+Nenhum segredo em nenhum arquivo. `terraform.tfvars` contém apenas CIDRs, AZs, nomes,
+flags de custo e o e-mail de alerta do budget — sem credencial, chave ou token.
+`checkov` CKV_AWS_41 (chave de acesso hardcoded no provider) **passou**.
+Nenhuma alteração de IAM, Security Group ou superfície de exposição nesta etapa.
+`.gitignore` ganhou exceção escopada para versionar `terraform.tfvars`; todo outro
+`.tfvars` continua ignorado.
+
+### Rollback
+
+Nada foi aplicado — não há infraestrutura a reverter. Para descartar o código:
+`git revert <commit>` ou remover a branch. O `.gitignore` volta com o mesmo revert.
+```
+
+---
+
+## 2026-08-13 — Etapa 2 de 5: VPC, Internet Gateway e as 4 subnets
+
+**Executor:** devops-engineer · **Branch:** `feat/adr-0001-networking-stack`
+**ADR:** `docs/adr/ADR-0001-arquitetura-de-rede-aws.md` — status `Aprovado` em 2026-08-12 por Laura.
+**Escopo desta etapa:** primeira metade do passo 4 do §7 — VPC, IGW e as 4 subnets. Route tables e associações ficaram para a etapa 3. Nenhum recurso tarifado, nenhum `plan` contra a AWS, nenhum `apply`.
+
+> **Data.** O prompt desta invocação informou 2026-08-12. `date +%F` no ambiente retorna **2026-08-13**, e é a data registrada aqui, conforme a instrução de usar a data real.
+
+### Feito
+
+Diretório novo `project-terraform/01-networking-stack/modules/network/`:
+
+| Arquivo | Conteúdo |
+| --- | --- |
+| `vpc.tf` | `aws_vpc.this` — e nada mais, conforme a regra de organização. `enable_dns_support` e `enable_dns_hostnames` em `true`, `instance_tenancy = "default"`. |
+| `vpc.internet-gateway.tf` | `aws_internet_gateway.this` anexado à VPC. |
+| `vpc.public-subnets.tf` | `aws_subnet.public` com `count = length(var.availability_zones)`, `map_public_ip_on_launch = true`. |
+| `vpc.private-subnets.tf` | `aws_subnet.private` com `count = length(var.availability_zones)`, `map_public_ip_on_launch = false`. |
+| `variables.tf` | 6 variáveis, apenas as consumidas pelos arquivos acima. Todas com `description`, todas `nullable = false`, nenhuma com `default`. |
+| `outputs.tf` | 6 outputs, apenas dos recursos acima. |
+| `versions.tf` | `required_providers` com `hashicorp/aws ~> 6.58`. Sem bloco `provider`, sem `backend`. Ver Divergências item 2. |
+| `README.md` | Estado de implementação por etapa, tabela de endereçamento, inputs, outputs, nomenclatura e limitações conhecidas. |
+
+**Decisões de implementação dentro do que o ADR já decidiu:**
+
+- **`count` em vez de recursos nomeados um a um.** `length(var.availability_zones)` governa a quantidade de subnets, então acrescentar uma AZ é mudança de `terraform.tfvars`, não de código. A ordem das três listas (`availability_zones`, `public_subnet_cidr_blocks`, `private_subnet_cidr_blocks`) é o contrato de pareamento.
+- **Sufixo `1a`/`1b` da tag `Name` derivado, não literal.** `substr(var.availability_zones[count.index], -2, -1)` extrai os dois últimos caracteres do nome da AZ. O §14 proíbe AZ hardcoded dentro de `modules/network`, e um literal `"1a"` seria exatamente isso. Assinatura de `substr` e o suporte a offset negativo com `length = -1` confirmados na documentação da linguagem.
+- **`enable_dns_support`/`enable_dns_hostnames` fixados em `true` no código, não parametrizados.** São invariantes de arquitetura do §6 cobradas pelo §14, não valores de ambiente — não estão em `terraform.tfvars` nem são passados por `main.tf`. O padrão do provider para `enable_dns_hostnames` é `false`, então a atribuição explícita é obrigatória.
+- **Nenhuma variável do módulo tem `default`.** O contrato é que a raiz forneça tudo; um `default` no módulo mascararia esquecimento na raiz.
+- **`output "availability_zones"` lê de volta de `aws_subnet.public[*].availability_zone`**, em vez de ecoar `var.availability_zones`. O output passa a refletir o que foi criado, não o que foi pedido.
+- **`internet_gateway_id` exposto** além dos outputs listados no §14. O IGW é um dos recursos desta etapa e o output é barato; os 9 outputs do §14 são o mínimo da raiz, não o teto do módulo.
+
+**Fonte substituta declarada — o MCP `terraform` estava indisponível nesta sessão.** Nenhuma ferramenta desse servidor foi exposta (`ToolSearch` com `+terraform` retornou vazio); o Docker estava reiniciando. O MCP `aws-mcp` estava disponível e não foi necessário — esta etapa não consultou a conta.
+
+Os argumentos de recurso **não foram escritos de memória**. As páginas do Terraform Registry são renderizadas por JavaScript e voltaram vazias no `WebFetch`, então a fonte usada foi a **documentação-fonte do provider no repositório oficial** (`raw.githubusercontent.com/hashicorp/terraform-provider-aws/main/website/docs/r/`), que é o markdown do qual o Registry é gerado:
+
+| Recurso | Argumentos confirmados |
+| --- | --- |
+| `aws_vpc` | `cidr_block`, `instance_tenancy`, `enable_dns_support` (default `true`), `enable_dns_hostnames` (**default `false`**), `tags`. Atributos `id`, `arn`, `cidr_block`. |
+| `aws_subnet` | `vpc_id` (obrigatório), `cidr_block`, `availability_zone` (nome, ex.: `us-east-1a`), `availability_zone_id` (ID, **não usado**), `map_public_ip_on_launch`, `tags`. Atributos `id`, `arn`. |
+| `aws_internet_gateway` | `vpc_id`, `tags`. Atributos `id`, `arn`, `owner_id`. |
+| função `substr` | `substr(string, offset, length)`; offset negativo conta do fim, `length = -1` vai até o fim. |
+
+### Validado
+
+| Validação | Comando | Resultado |
+| --- | --- | --- |
+| Formatação | `terraform fmt -check -recursive` | **exit 0**, limpo. Nenhum arquivo reformatado. |
+| Init do módulo | `terraform init -backend=false` em `modules/network` | **exit 0.** Provider resolvido: `hashicorp/aws v6.59.0`, dentro do pin `~> 6.58`. |
+| Validate do módulo | `terraform validate` em `modules/network` | **exit 0** — "Success! The configuration is valid." |
+| Init/validate da raiz | `terraform init -backend=false` em `01-networking-stack` | **Falha esperada, exit 1.** 4 erros `Unsupported argument`: `nat_gateway_az`, `enable_nat_gateway`, `enable_flow_logs`, `flow_logs_retention_in_days`. São exatamente as variáveis das etapas 3 e 4. Ver Risco residual 1. |
+| Lint | `tflint --recursive` 0.64.0 | **exit 0, 0 issues** — depois da correção descrita em Divergências item 2. Na primeira passada: 1 warning `terraform_required_version`. |
+| Policy scan | `checkov -d modules/network --var-file terraform.tfvars` 3.3.10 | **2 passed, 4 failed, 0 skipped.** Detalhe abaixo. |
+| Policy scan (stack) | `checkov -d . --var-file terraform.tfvars --skip-path .terraform` | **3 passed, 4 failed, 0 skipped.** Mesmos 4 achados. |
+
+**Os 4 achados do checkov — nenhum suprimido nesta etapa.** O §7 passo 10 é o momento de suprimir, com comentário justificado apontando para o ADR; suprimir agora seria antecipar etapa e esconder achado que o passo 3 ainda vai resolver sozinho.
+
+| ID | Recurso | Situação |
+| --- | --- | --- |
+| `CKV_AWS_130` | `aws_subnet.public[0]`, `aws_subnet.public[1]` | **Candidato legítimo a supressão.** `map_public_ip_on_launch = true` é exigência do §6 e do §14, e o §9 já registra que é habilitação, não exposição. As duas subnets privadas **passaram** neste mesmo check. |
+| `CKV2_AWS_11` | `aws_vpc.this` | Flow logging. `vpc.flow-logs.tf` é etapa 4 e, por decisão do §5, fica condicional com `default = false`. Provavelmente continuará falhando depois da etapa 4 — é o trade-off "Flow Logs sempre ligados: sacrificado". |
+| `CKV2_AWS_12` | `aws_vpc.this` | Default SG restritivo. `vpc.security-groups.tf` é etapa 3 e resolve o achado de fato, sem supressão. |
+
+**Achado operacional sobre o checkov — vale para todas as etapas seguintes.** Rodar `checkov -d modules/network` **sem** `--var-file` reporta `Passed 0, Failed 2` e **omite as 4 subnets por completo**: sem valor para `var.availability_zones`, o checkov não resolve `count = length(...)` e **descarta o recurso silenciosamente**, sem aviso. `CKV_AWS_130` e `CKV2_AWS_1` simplesmente não aparecem. Um scan "limpo" nessas condições é falso negativo. **Todo scan deste módulo precisa de `--var-file terraform.tfvars`.**
+
+**Nada foi aplicado na AWS.** Nenhum `plan` contra a conta, nenhum comando mutante, nenhuma chamada à AWS nesta etapa. Os artefatos de `init` do módulo (`.terraform/` e `.terraform.lock.hcl`) foram removidos após a validação — módulo filho não é root e não carrega lock próprio; o lock da raiz não foi tocado.
+
+### Pendente
+
+| # | Item | Bloqueia |
+| --- | --- | --- |
+| 1 | `vpc.public-route-table.tf` e `vpc.private-route-tables.tf` — RT pública com `0.0.0.0/0 → igw` + 2 associações, e 2 RTs privadas com associação 1:1, **sem rota default**. | Etapa 3. Também destrava o `init` da raiz. |
+| 2 | `vpc.endpoints.tf` — Gateway Endpoint S3 nas 2 RTs privadas + EC2 Instance Connect Endpoint em `private-1a`. | Etapa 3. |
+| 3 | `vpc.security-groups.tf` — `aws_default_security_group` sem regras. Resolve `CKV2_AWS_12`. | Etapa 3. |
+| 4 | `vpc.nat-gateway.tf` e `vpc.flow-logs.tf`, condicionais. | Etapa 4. |
+| 5 | Variáveis `nat_gateway_az`, `enable_nat_gateway`, `enable_flow_logs`, `flow_logs_retention_in_days` no módulo. | Etapas 3 e 4. `init` da raiz falha até lá. |
+| 6 | Outputs `public_route_table_id`, `private_route_table_ids`, `nat_gateway_id`, `nat_public_ip`. | Etapas 3 e 4. |
+| 7 | Todos os 8 itens pendentes da etapa 1 seguem pendentes — bucket de state, sessão do profile, datas do curso, tag `Owner`, P8/P9, Cost Allocation Tag, assinatura de e-mail. | `plan` e `apply` reais. |
+
+### Divergências
+
+Voltam para o `cloud-devops-architect`. Não editei o ADR.
+
+1. **Layout de diretórios — divergência já decidida pela usuária, não reaberta.** A stack fica em `project-terraform/01-networking-stack/` como raiz Terraform, com `modules/network/` dentro dela, substituindo `envs/prd/` do §8. Determinação da usuária, superior ao ADR. Registrada por continuidade com a etapa 1; **não escalada de novo**.
+
+2. **`required_version` no `versions.tf` do módulo — conflito interno do ADR.** O layout do §8 anota o arquivo do módulo como "required_providers apenas", mas a regra `terraform_required_version` do tflint exige a restrição também em módulo, e o §14 pede **"tflint limpo"** como critério de aceite. Os dois pontos do ADR não podem ser satisfeitos ao mesmo tempo. **Resolvi a favor do §14**: o critério de aceite é decisão normativa, o comentário de layout é descritivo, e desabilitar a regra do linter para passar é proibido. Adicionado `required_version = "~> 1.13"`, idêntico ao da raiz, o que não altera resolução de versão. Divergência documentada no próprio arquivo. **Sugiro que o §8 troque "required_providers apenas" por "sem bloco `provider` e sem `backend`".**
+
+3. **`enable_dns_support`/`enable_dns_hostnames` não parametrizados.** O §8 diz "CIDRs, AZs, nomes e flags entram por `variables.tf`", enquanto o §14 enumera como proibido apenas "CIDR, AZ, nome ou ARN hardcoded". Interpretei "flags" como as duas variáveis de controle de custo do §8, e mantive os dois booleanos de DNS no código, com comentário. Se a intenção era literal, são duas variáveis a acrescentar — mudança trivial, mas quero a confirmação registrada e não presumida.
+
+4. **MCP `terraform` indisponível nesta sessão**, ao contrário da etapa 1, em que respondeu. A fonte substituta está declarada acima. Isso reforça que a ressalva do §16 sobre indisponibilidade do MCP **não deve ser removida** do ADR: a disponibilidade oscila entre sessões.
+
+### Sugestões
+
+Identificadas e **não implementadas**, por estarem fora do escopo desta etapa.
+
+1. **Validação de pareamento entre as três listas.** `availability_zones` com 2 entradas e `public_subnet_cidr_blocks` com 1 produz erro de índice cru, não mensagem clara. A raiz valida que há exatamente 2 AZs, mas o pareamento com os CIDRs não é validado em lugar nenhum. Terraform 1.9+ permite `validation` referenciando outra variável — a nota da regra de nomenclatura que diz o contrário está desatualizada. Não implementei por disciplina de escopo.
+2. **`.tflint.hcl` com o ruleset `aws`** — já sugerido na etapa 1 e **agora com consequência medida**: o `tflint` desta etapa rodou só com o ruleset bundled `terraform` 0.15.0, que cobre linguagem, não provider. Nenhum argumento de `aws_vpc`, `aws_subnet` ou `aws_internet_gateway` foi conferido pelo linter — a conferência foi manual, contra a documentação-fonte do provider. Com o plugin AWS, essa classe de erro passaria a ser pega automaticamente nas etapas 3 e 4, que têm bem mais superfície.
+3. **Fixar `--var-file terraform.tfvars` na invocação padrão do checkov** (script ou `.checkov.yaml`), pelo motivo descrito em "Achado operacional". É o tipo de pegadinha que só aparece uma vez e depois passa despercebida.
+
+### Risco residual
+
+1. 🟠 **A branch está num estado que não faz `terraform init` na raiz.** É intencional e acordado — as variáveis que faltam chegam nas etapas 3 e 4 —, mas qualquer CI que rode `init` ou `validate` na raiz falha até a etapa 4 terminar. A validação hoje só é possível no módulo isolado.
+2. 🟠 **O `tflint` não conferiu nenhum argumento de provider** (item 2 das Sugestões). O código foi conferido à mão contra a documentação-fonte, o que é bom mas não é automatizado, e `terraform validate` valida schema — não pega argumento válido com semântica errada.
+3. 🟡 **Rede sem conectividade externa neste estado.** Sem as route tables da etapa 3, nem as subnets públicas têm rota `0.0.0.0/0`. Aplicar o módulo hoje criaria uma VPC funcional porém isolada. Não é defeito: é etapa intermediária, e não há intenção de aplicar antes da etapa 4.
+4. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Verdadeiro em `us-east-1` e em toda região comercial da AWS, mas é uma suposição do código, não uma garantia da API. Se o nome mudar de forma, a tag `Name` sai errada — sem quebrar nada funcional.
+5. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`, e eu segui o ADR. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita, sem exceção. Repetido da etapa 1 porque continua valendo.
+
+### Corpo do PR — para colar no GitHub
+
+> `gh` está instalado neste ambiente (`C:\Program Files\GitHub CLI\gh.exe`). Nenhum PR foi aberto: a entrega é 2 de 5 etapas e o PR pertence ao §7 passo 16.
+
+~~~markdown
+## ADR-0001 — Arquitetura de rede AWS (etapas 1 e 2 de 5)
+
+Implementa: docs/adr/ADR-0001-arquitetura-de-rede-aws.md · Etapas: 1 e 2 de 5
+
+### O que muda
+
+Etapa 1 criou a raiz Terraform e o AWS Budget de US$ 5,00. Etapa 2 cria
+`modules/network/` com VPC 10.0.0.0/24, Internet Gateway e as 4 subnets /26 em
+us-east-1a e us-east-1b. Route tables, endpoints, default SG travado, NAT Gateway e
+Flow Logs são as etapas 3 e 4. Nenhum recurso tarifado. Nada foi aplicado na AWS.
+
+### Plan
+
+Não executado. `terraform init` na raiz ainda não completa: `main.tf` passa 4
+variáveis que o módulo só declara nas etapas 3 e 4. Validação possível hoje, no
+módulo isolado: `fmt -check` exit 0, `validate` exit 0, `tflint` exit 0 / 0 issues,
+`checkov` 2 passed / 4 failed / 0 skipped.
+
+Quando o plan for possível, o esperado é 0 to change, 0 to destroy.
+
+### Ambientes
+
+- [ ] production (`prd`) — único ambiente do ADR. Não aplicado.
+
+### Critérios de aceite (ADR §14)
+
+- [x] `terraform fmt -check` limpo — exit 0 na stack inteira
+- [x] `terraform validate` limpo — exit 0 no módulo
+- [x] `tflint` limpo — exit 0, 0 issues (ruleset bundled `terraform` apenas)
+- [x] `checkov` executado — 4 achados reportados, **nenhuma supressão** (é o §7 passo 10)
+- [x] VPC com `enable_dns_support` e `enable_dns_hostnames` habilitados
+- [x] 4 subnets nos CIDRs e AZs exatos do §14; públicas `map_public_ip_on_launch = true`,
+      privadas `false`; IGW anexado
+- [x] Nenhum CIDR, AZ, nome ou ARN hardcoded em `modules/network`
+- [x] `backend "s3"` e `provider "aws"` somente na raiz
+- [ ] Route tables, VPC Endpoints, EIC Endpoint, default SG travado — etapa 3
+- [ ] NAT Gateway e Flow Logs condicionais, e os planos de contagem exata do §14 — etapa 4
+- [ ] Validação funcional de egress — etapa 5
+
+### Segurança
+
+Nenhum segredo em nenhum arquivo. Nenhuma alteração de IAM, Security Group, NACL ou
+superfície de exposição nesta etapa — o único SG tocado pelo ADR é o default da VPC, e
+isso é etapa 3. `map_public_ip_on_launch = true` nas subnets públicas é habilitação,
+não exposição (§9): nenhum recurso com IP público é criado por este módulo.
+`CKV_AWS_130` falha nas 2 subnets públicas por esse motivo e é candidato a supressão
+justificada no §7 passo 10.
+
+### Rollback
+
+Nada foi aplicado — não há infraestrutura a reverter. Para descartar o código:
+`git revert <commit>` ou remover a branch.
+~~~
+
+---
+
+## 2026-08-13 — Revisão da etapa 2: reverificação contra o MCP `terraform`
+
+**Executor:** devops-engineer · **Branch:** `feat/adr-0001-networking-stack`
+**ADR:** `docs/adr/ADR-0001-arquitetura-de-rede-aws.md` — status `Aprovado` em 2026-08-12 por Laura.
+**Escopo:** revisão, não etapa nova. Nenhum recurso novo, nenhum avanço para route tables, NAT, endpoints, flow logs ou security groups.
+
+> **Por que esta revisão existe.** Na etapa 2 o MCP `terraform` estava fora e a sessão caiu para o markdown-fonte do provider no GitHub, declarando a substituição. A definição do agente foi alterada desde então: MCP fora é **parada total** e substituir a fonte é **proibido**. Esta revisão reverifica, contra o MCP, tudo o que foi escrito sob a fonte substituta.
+
+### Pré-flight de MCP
+
+| MCP | Verificação | Resultado |
+| --- | --- | --- |
+| `terraform` | `ToolSearch` + chamada real `get_latest_provider_version(hashicorp/aws)` | **No ar** — retornou `6.60.0` |
+| `aws-mcp` | `ToolSearch` + chamada real `ec2:DescribeAvailabilityZones` em `us-east-1` | **No ar** — retornou as 6 AZs |
+
+Schema carregado não prova servidor no ar, por isso cada MCP levou uma chamada real antes de eu prosseguir.
+
+### Feito
+
+**Reverificação de cada recurso e cada argumento contra o MCP `terraform`, na versão pinada no lock (`6.59.0`), não na `latest`.** O lock resolve `~> 6.58` em 6.59.0, e é essa a versão que `validate` e `plan` usam.
+
+| Recurso | `provider_doc_id` @ 6.59.0 | Argumentos e atributos conferidos |
+| --- | --- | --- |
+| `aws_vpc` | `13197359` | `cidr_block`, `instance_tenancy`, `enable_dns_support` (default **true**), `enable_dns_hostnames` (default **false**), `tags`. Atributos `id`, `cidr_block`. |
+| `aws_internet_gateway` | `13196589` | `vpc_id` (Optional), `tags`. Atributo `id`. |
+| `aws_subnet` | `13197319` | `vpc_id` (**Required**), `cidr_block`, `availability_zone`, `map_public_ip_on_launch` (default `false`), `tags`. Atributo `id`; `availability_zone` legível como atributo. |
+| `aws_budgets_budget` | `13195997` | `budget_type`, `time_unit` (**Required**; valores `MONTHLY`/`QUARTERLY`/`ANNUALLY`/`DAILY`), `limit_amount`, `limit_unit`, `time_period_start`/`_end` (formato `AAAA-MM-DD_HH:MM`), `cost_filter` (`name` = `TagKeyValue`, valor `user:<Tag>$<Valor>`), `notification` (`comparison_operator`, `threshold`, `threshold_type`, `notification_type`, `subscriber_email_addresses`), `tags`. |
+
+### Validado
+
+| Validação | Comando | Resultado |
+| --- | --- | --- |
+| Formatação | `terraform fmt -check -recursive` | **exit 0**, limpo |
+| Init do módulo | `terraform -chdir=modules/network init -backend=false` | **exit 0** — resolveu `hashicorp/aws v6.60.0` |
+| Validate do módulo | `terraform -chdir=modules/network validate` | **exit 0** — "Success! The configuration is valid." |
+| Lint | `tflint --recursive` 0.64.0 | **exit 0, 0 issues** |
+| Policy scan (módulo) | `checkov -d modules/network --var-file terraform.tfvars` | **2 passed, 4 failed, 0 skipped** |
+| Policy scan (stack) | `checkov -d . --var-file terraform.tfvars --skip-path .terraform` | **3 passed, 4 failed, 0 skipped** |
+
+Os 4 achados do checkov são **os mesmos da etapa 2**, com os mesmos IDs — `CKV_AWS_130` nas 2 subnets públicas, `CKV2_AWS_11` e `CKV2_AWS_12` no `aws_vpc`. Nenhuma supressão: continua sendo o §7 passo 10. O `exit 1` do checkov é o código de "há check falhando", não erro de execução.
+
+**Cobertura dupla e complementar:** o MCP confirma os argumentos contra a versão **pinada** (6.59.0); o `terraform validate` confirma contra o **schema real** do provider que o `init` resolveu (6.60.0, porque módulo filho não carrega lock próprio). Todo argumento escrito passou nas duas.
+
+**Nada foi aplicado na AWS.** Nenhum `plan` contra a conta, nenhum comando mutante. A única chamada à AWS foi `ec2:DescribeAvailabilityZones`, leitura pura, no pré-flight. Os artefatos de `init` (`.terraform/` e `.terraform.lock.hcl`) foram removidos de `modules/network/` após a validação; o lock da raiz segue em 6.59.0, intocado.
+
+### Divergências entre a fonte substituta e o MCP
+
+**Nenhuma. Zero correções em arquivo `.tf`.**
+
+Os 8 arquivos do módulo e o `budget.tf` da etapa 1 estão corretos: todo argumento existe, todo nome está certo, todo tipo é válido e todo atributo referenciado por output é exportado. Nada deprecado, nada faltando, nada renomeado.
+
+Vale registrar os dois pontos de maior risco, porque ambos passaram:
+
+1. **`enable_dns_hostnames` default `false`** — o comentário do `vpc.tf` afirma isso e o MCP confirma. Era o candidato número um a erro de memória, e está certo.
+2. **`time_unit = "ANNUALLY"` no budget** — o MCP confirma que `MONTHLY`, `QUARTERLY`, `ANNUALLY` e `DAILY` são os únicos valores válidos e que **não existe "CUSTOM"**. A escolha da etapa 1 está certa, e o bloco `validation` de `variables.tf` lista exatamente esses 4 valores.
+
+**O resultado bom não valida o método.** A fonte substituta lia `raw.githubusercontent.com/.../terraform-provider-aws/main/website/docs/r/` — a branch de desenvolvimento, ou seja, documentação da versão **não lançada**, não da 6.59.0 do lock. Um argumento adicionado em `main` e ainda não publicado teria passado por verificado e quebrado só no `apply`. Aqui não quebrou porque os quatro recursos usam argumentos antigos e estáveis. Com superfície maior — NAT Gateway, flow logs, IAM — a chance de acerto cairia.
+
+### Feito fora do Terraform
+
+**Memória do agente estava em local errado e teria sido commitada.** Os arquivos viviam em `project-terraform/01-networking-stack/.claude/agent-memory/devops-engineer/`. O `.gitignore` ignora `.claude/agent-memory/` **ancorado na raiz**, então a cópia aninhada **não** era ignorada — `git check-ignore` confirmou. Movida para `.claude/agent-memory/devops-engineer/`, que é o caminho correto e é ignorado.
+
+**Conteúdo corrigido, não só movido.** A memória `validation-tooling-scope` recomendava explicitamente o markdown do provider no GitHub como "fonte substituta declarável quando o MCP `terraform` estiver fora" — orientação que a definição atual do agente **proíbe**. Mantida essa recomendação, a próxima sessão repetiria o problema exatamente por seguir a memória. Reescrita para apontar o fluxo `search_providers` → `get_provider_details` com `provider_version` igual à do lock. Adicionada `feedback_mcp-parada-total.md` registrando a regra e o motivo.
+
+Nenhum valor sensível foi gravado: sem credencial, ARN, ID de conta, endpoint ou conteúdo de state.
+
+### Pendente
+
+Inalterado em relação à etapa 2. Nada foi resolvido nesta revisão e nada novo entrou.
+
+| # | Item | Bloqueia |
+| --- | --- | --- |
+| 1 | `vpc.public-route-table.tf` e `vpc.private-route-tables.tf` | Etapa 3. Também destrava o `init` da raiz. |
+| 2 | `vpc.endpoints.tf` — Gateway Endpoint S3 + EIC Endpoint | Etapa 3. |
+| 3 | `vpc.security-groups.tf` — `aws_default_security_group` sem regras. Resolve `CKV2_AWS_12`. | Etapa 3. |
+| 4 | `vpc.nat-gateway.tf` e `vpc.flow-logs.tf`, condicionais | Etapa 4. |
+| 5 | Variáveis `nat_gateway_az`, `enable_nat_gateway`, `enable_flow_logs`, `flow_logs_retention_in_days` no módulo | Etapas 3 e 4. `init` da raiz falha até lá. |
+| 6 | Outputs `public_route_table_id`, `private_route_table_ids`, `nat_gateway_id`, `nat_public_ip` | Etapas 3 e 4. |
+| 7 | Os 8 pendentes da etapa 1 — bucket de state, sessão do profile, datas do curso, tag `Owner`, P8/P9, Cost Allocation Tag, assinatura de e-mail | `plan` e `apply` reais. |
+
+### Divergências para o Arquiteto
+
+As 5 divergências da etapa 2 e as 5 da etapa 1 **seguem abertas** — nenhuma foi resolvida aqui, e não as reabro. Uma se atualiza e uma é nova:
+
+1. **Etapa 1, divergência 5 e etapa 2, divergência 4 — ressalva do §16 sobre o MCP `terraform`.** O §16 do ADR declara a indisponibilidade do MCP e lista dados vindos da API pública do Registry. **Reverificado agora via MCP:** `hashicorp/aws` mais recente é **6.60.0**, não 6.58.0 como o §16 registrou. O pin `~> 6.58` continua válido e o lock em 6.59.0 continua dentro dele — nenhuma mudança de código —, mas **o número no §16 está desatualizado**. Sugiro que o §16 passe a citar a versão do lock em vez da "última publicada", que envelhece sozinha.
+
+2. **Nova, de método:** a etapa 2 declarou fonte substituta no log, e o §16 do ADR faz o mesmo. Agora que a substituição é proibida na implementação, sugiro que o Arquiteto trate "MCP indisponível" como bloqueio de escrita do ADR também, e não como ressalva declarável — pelo mesmo motivo: a ressalva é honesta, mas o leitor da revisão não distingue o que foi verificado do que não foi.
+
+### Sugestões
+
+Repetidas das etapas 1 e 2 porque continuam valendo e continuam não implementadas.
+
+1. **`.tflint.hcl` com o ruleset `aws`.** Segue sendo a lacuna mais cara: o `tflint` desta revisão rodou de novo só com o bundled `terraform` 0.15.0 e **não conferiu um único argumento de provider**. A conferência foi o MCP, manual. Com o plugin AWS, a classe de erro que motivou esta revisão passaria a ser pega automaticamente — e as etapas 3 e 4 têm muito mais superfície que estas.
+2. **`--var-file terraform.tfvars` fixado num `.checkov.yaml`**, pelo motivo já medido.
+3. **Validação de pareamento entre as três listas** de AZ e CIDRs.
+
+### Risco residual
+
+1. 🟠 **O `tflint` continua sem conferir provider.** Reduzido pela reverificação via MCP, não eliminado: a conferência é manual e depende de eu executá-la, enquanto um linter rodaria sozinho em toda etapa e em qualquer CI.
+2. 🟠 **A branch continua sem fazer `terraform init` na raiz** até a etapa 4. Inalterado e intencional.
+3. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Inalterado.
+4. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita. Repetido das etapas 1 e 2 porque continua valendo.
+
+---
+
+## 2026-08-13 — Etapa 3 de 5: caminho de egress (route tables, NAT Gateway) e `.tflint.hcl`
+
+### Pré-flight de MCP
+
+Regra nova da definição do agente, motivada pela etapa 2. Confirmado com **chamada real**, não só carregamento de schema:
+
+| MCP | Chamada | Resultado |
+| --- | --- | --- |
+| `terraform` | `search_providers` (`aws`, `provider_version = 6.59.0`, `route_table`) | 14 documentos retornados |
+| `aws-mcp` | `ec2:DescribeAvailabilityZones` em `us-east-1` | `us-east-1a` e `us-east-1b` `available` |
+
+**Achado do pré-flight:** `get_latest_provider_version(hashicorp/aws)` respondeu `provider not found: hashicorp/aws`. O servidor está **no ar** — `search_providers` e `get_provider_details` funcionam normalmente na mesma sessão. É uma falha daquele endpoint específico, não indisponibilidade do MCP, então não configura parada total. Consequência prática: nenhuma, porque a versão que importa é a do lock (6.59.0), não a latest.
+
+### Feito
+
+**Passo 0 — `.tflint.hcl` com o ruleset `aws`** (a sugestão repetida nas etapas 1, 2 e na revisão).
+
+- `project-terraform/01-networking-stack/.tflint.hcl` — plugin `aws` **pinado em 0.48.0**, mais o bundled `terraform` com preset `recommended` declarado explicitamente.
+- `project-terraform/01-networking-stack/modules/network/.tflint.hcl` — **cópia intencional**, ver a armadilha abaixo.
+
+**Armadilha encontrada e corrigida — `tflint --recursive` não herda configuração.** A primeira execução saiu limpa e era **falso-limpo**. `--recursive` executa em cada diretório como se fosse o cwd e procura um `.tflint.hcl` local; ele não propaga o do diretório pai. Medido com `tflint --version` em cada diretório:
+
+| Diretório | Rulesets carregados |
+| --- | --- |
+| raiz da stack | `ruleset.aws (0.48.0)` + `ruleset.terraform (0.15.0-bundled)` |
+| `modules/network` (antes da cópia) | **só** `ruleset.terraform (0.15.0-bundled)` |
+
+Ou seja: o único diretório que contém recursos `aws_*` era exatamente o que rodava sem o ruleset `aws`. `TFLINT_CONFIG_FILE` apontando para a raiz resolve e foi verificado, mas faz o gate depender de alguém lembrar de exportar uma variável de ambiente — e esquecer produz falso-limpo silencioso. Optei pela duplicação de 10 linhas, que torna `tflint --recursive` correto por padrão. As duas cópias têm comentário apontando uma para a outra.
+
+**Controle positivo do ruleset.** "Limpo" só vale se a ferramenta for capaz de acusar. Em `scratchpad/tflint-probe/`, com a mesma configuração:
+
+- `instance_type = "t4g.nao-existe"` → **acusou** `aws_instance_invalid_type`.
+- `availability_mode = "zonalzinho"` em `aws_nat_gateway` → **não acusou**.
+
+**Escopo real do plugin, medido:** ele cobre um conjunto **curado** de regras por recurso, não validação de enum contra o schema do provider. O MCP `terraform` continua sendo a fonte primária para escrever argumento; o plugin é rede de segurança parcial, não substituto.
+
+**O ruleset `aws` não encontrou nada nos arquivos das etapas 1 e 2.** Nenhuma correção retroativa foi necessária.
+
+**Recursos da etapa 3.** Todo argumento verificado no MCP `terraform` contra a versão do lock (**6.59.0**), não a latest.
+
+| Arquivo | Recursos |
+| --- | --- |
+| `modules/network/vpc.public-route-table.tf` | `aws_route_table.public`, `aws_route.public` (`0.0.0.0/0` → IGW), `aws_route_table_association.public` (count 2) |
+| `modules/network/vpc.private-route-tables.tf` | `aws_route_table.private` (count 2), `aws_route_table_association.private` (count 2), `aws_route.private` (**condicional**, count 2 quando ligado) |
+| `modules/network/vpc.nat-gateway.tf` | `aws_eip.nat` (**condicional**), `aws_nat_gateway.this` (**condicional**) |
+
+Decisões de implementação e o porquê:
+
+- **`aws_route` separado em vez de bloco `route` inline.** O provider proíbe misturar os dois no mesmo route table ("will cause a conflict of rule settings and will overwrite rules"), e o critério de aceite do §14 exige que as 2 rotas privadas apareçam como **recursos** no plan — bloco inline seria alteração do route table, não recurso novo. A RT pública usa a mesma forma por simetria, para que ninguém acrescente um bloco inline depois e sobrescreva a rota sem perceber.
+- **EIP e NAT compartilham a mesma variável de `count`**, nunca duas. É o que impede o EIP órfão de R6 — EIP alocado e não anexado custa os mesmos US$ 0,005/h de um EIP em uso.
+- **`subnet_id` do NAT resolvido por `index(var.availability_zones, var.nat_gateway_az)`**, não `[0]` fixo. Trocar a AZ do NAT (recuperação prevista em R1) passa a não exigir edição de código.
+- **`availability_mode = "zonal"` e `connectivity_type = "public"` explícitos**, apesar de serem os defaults do provider — ADR §4 (Opção A) e §6 os especificam nominalmente, e explicitar deixa a Opção C visível como troca de uma linha.
+- **`depends_on = [aws_internet_gateway.this]` no NAT**, exigido por §15 ponto 3. **Não** no EIP: a nota do provider sobre EIP precisar do IGW vale para EIP associado a `instance`/`network_interface`; aqui ele é só alocação, e quem associa é o NAT, que já depende.
+- **`count` como primeiro argumento seguido de linha em branco**, e `tags` como último argumento real, conforme `.claude/rules/terraform-naming.md`.
+
+**Destravado o `init` da raiz.** As 4 variáveis foram declaradas em `modules/network/variables.tf` — `nat_gateway_az`, `enable_nat_gateway`, `enable_flow_logs`, `flow_logs_retention_in_days` — incluindo as duas de flow logs, cujos recursos só chegam na etapa 4. Os 4 `Unsupported argument` sumiram e a raiz volta a validar de ponta a ponta.
+
+`enable_nat_gateway` e `enable_flow_logs` são as **únicas** variáveis do módulo com `default`, rompendo de propósito a regra "nenhuma variável tem default" do topo do arquivo. Motivo: o critério de aceite do §14 exige `default = false` nas duas, e a razão é defesa em profundidade — se a raiz um dia deixar de repassá-las, o módulo cai no estado de custo **zero**, não no tarifado. O default seguro precisa morar na camada mais interna.
+
+**Outputs.** Entraram `public_route_table_id`, `private_route_table_ids`, `nat_gateway_id` e `nat_public_ip`. Com eles, os **9 outputs** exigidos pelo §14 estão declarados e a raiz resolve por completo. Os dois de NAT usam `try(..., "")` — string vazia é a evidência de que a janela de custo está fechada.
+
+### Validado
+
+| Validação | Comando | Resultado |
+| --- | --- | --- |
+| Formatação | `terraform fmt -recursive -check -diff` | exit 0, nenhum arquivo reformatado |
+| `init` da raiz | `terraform init -backend=false` | **exit 0** — antes falhava com 4 `Unsupported argument` |
+| `validate` da raiz | `terraform validate` | `Success! The configuration is valid.` |
+| `validate` do módulo | `terraform -chdir=modules/network` idem | `Success! The configuration is valid.` |
+| tflint | `tflint --recursive` **com ruleset `aws` nos 2 diretórios** | **2 warnings**, ambos esperados — ver Pendente |
+| checkov | `checkov -d . --var-file terraform.tfvars --skip-path .terraform` | **Passed 14, Failed 4** |
+
+Evolução do checkov: etapa 2 fechou em `Passed 3, Failed 4`. Os 4 failed são **os mesmos**, nenhum novo veio da etapa 3.
+
+**O scan default não cobre os recursos desta etapa.** Com `enable_nat_gateway = false` o `count` resolve para 0 e o checkov descarta o recurso sem avisar — a armadilha já medida na etapa 2. Reescaneei com um `--var-file` adicional em scratchpad (`enable_nat_gateway = true`), scan **estático**, sem tocar a AWS e sem alterar nada no repositório:
+
+| Invocação | Resultado |
+| --- | --- |
+| `--var-file terraform.tfvars` | `Passed 14, Failed 4` |
+| idem + `--var-file <scratch>/natwindow.tfvars` | `Passed 15, Failed 5` |
+
+O 5º achado é **`CKV2_AWS_19`** — "Ensure that all EIP addresses allocated to a VPC are attached to EC2 instances" — em `aws_eip.nat[0]`. Sem o override ele ficaria invisível até o dia em que a janela de custo abrisse.
+
+`terraform fmt`, `validate` e `tflint` foram executados; **nenhuma validação foi pulada**. `tfsec` não está instalado neste ambiente e não foi executado — o ADR §14 pede `checkov`, não `tfsec`.
+
+### Pendente
+
+| # | Item | Motivo |
+| --- | --- | --- |
+| 1 | **2 warnings de `terraform_unused_declarations`** — `enable_flow_logs` e `flow_logs_retention_in_days` | Consequência direta e prevista de declarar as 4 variáveis agora para destravar o `init`. Resolvem sozinhos na etapa 4, quando `vpc.flow-logs.tf` passar a consumi-las. **Não desabilitei a regra** — desligar linter para "fazer passar" é proibido, e o §14 pede tflint limpo, o que só é honesto depois da etapa 4. |
+| 2 | Evidência do §14 — `plan` sem variáveis com 0 recursos tarifados, e `plan -var="enable_nat_gateway=true"` com exatamente 4 | `terraform plan` contra a AWS estava **fora do escopo desta etapa por instrução explícita**. A contagem esperada está correta por leitura do código (1 EIP + 1 NAT + 2 rotas), mas **não foi verificada por execução**. |
+| 3 | `vpc.endpoints.tf`, `vpc.security-groups.tf`, `vpc.flow-logs.tf` | Etapa 4. Resolvem `CKV2_AWS_12` e condicionam `CKV2_AWS_11`. |
+| 4 | Os 8 pendentes da etapa 1 — bucket de state, sessão do profile, datas do curso, tag `Owner`, P8/P9, Cost Allocation Tag, assinatura de e-mail | `plan` e `apply` reais. |
+
+### Divergências para o Arquiteto
+
+As divergências abertas das etapas 1 e 2 **seguem abertas** e não as reabro. Duas novas:
+
+1. **`CKV2_AWS_19` no EIP do NAT — decisão de supressão não é minha.** O check exige EIP anexado a **instância EC2**; o nosso está anexado a um **NAT Gateway**, via `allocation_id`. É limitação do checkov, que não reconhece esse vínculo — não é exposição real. Mas o ADR §7 etapa 10 autoriza suprimir **apenas** o que está listado como trade-off aceito em §5, e este não está. **Não adicionei `checkov:skip` por conta própria.** Peço ao Arquiteto que decida: (a) incluir `CKV2_AWS_19` na lista de supressões justificadas de §5, ou (b) aceitar o finding no relatório. Recomendo (a), com a justificativa "EIP anexado a NAT Gateway, não a instância; o check não modela essa associação".
+
+2. **Nomenclatura do output `nat_public_ip`.** Pelo padrão `{name}_{type}_{attribute}` de `.claude/rules/terraform-naming.md`, o nome seria `nat_gateway_public_ip`. O §14 fixa `nat_public_ip` na lista de outputs exigidos e o `outputs.tf` da raiz já o referencia assim. **Segui o ADR**, como manda a regra de precedência, e registro aqui. Sugestão de baixa prioridade: alinhar §14 ao padrão, ou anotar a exceção no ADR.
+
+### Sugestões
+
+1. **Fixar `--var-file terraform.tfvars` num `.checkov.yaml`.** Sugestão repetida das etapas 1 e 2, e esta etapa mostrou o custo de não tê-la: o scan default escondeu `CKV2_AWS_19`. Um `.checkov.yaml` que fixasse o `--var-file` e o `--skip-path` eliminaria metade do problema. A outra metade — recursos condicionais nunca escaneados no estado default — só se resolve escaneando também com a janela aberta. Vale virar dois alvos no que quer que sirva de task runner: `scan` e `scan:natwindow`.
+2. **Um wrapper de validação** (Makefile, `justfile` ou script) encadeando `fmt` → `validate` (raiz e módulo) → `tflint --recursive` → `checkov` nas duas variantes. Hoje são 6 comandos com pegadinhas de diretório e de env var; cada uma delas é uma chance de falso-limpo.
+3. **Validação de pareamento entre as três listas** de AZ e CIDRs. Repetida da etapa 2, continua não implementada.
+
+### Risco residual
+
+1. 🟠 **`nat_gateway_az` inválida só falha quando a janela abre.** Se o valor não estiver em `availability_zones`, `index()` aborta — mas com `count = 0` o Terraform não avalia o corpo do recurso, então `validate` e o `plan` do estado base passam limpos. O erro aparece só no `apply -var="enable_nat_gateway=true"`, que é exatamente o momento de maior pressa. `validation` de variável não resolve (não referencia outra variável) e `precondition` também não (mesma avaliação preguiçosa). Mitigação real seria uma checagem na raiz; não implementada por escopo fechado.
+2. 🟠 **A duplicação do `.tflint.hcl` pode divergir.** Duas cópias do pin `0.48.0`. Se alguém atualizar só uma, o módulo volta silenciosamente a rodar sem o ruleset `aws` — a mesma falha que esta etapa corrigiu, mas de volta pela porta dos fundos. Os comentários avisam; nada impõe.
+3. 🟡 **O plugin `aws` não valida enum do schema.** Medido no controle positivo: `availability_mode = "zonalzinho"` passou. A cobertura é um conjunto curado de regras. O MCP segue obrigatório para escrever argumento — o plugin reduziu o risco, não o eliminou.
+4. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Inalterado das etapas anteriores; agora também nas tags das route tables e do NAT.
+5. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita. Repetido das etapas 1 e 2 porque continua valendo.
