@@ -45,14 +45,31 @@ A arquitetura precisa chegar ao DevOps Engineer com o layout **já decidido**. N
 - **Ambientes:** separação explícita entre dev/stg/prd, por diretório ou por workspace. Diga qual e por quê; nunca deixe implícito.
 - **State:** backend remoto com locking e criptografia. Um state por ambiente e por domínio de falha — granularidade justificada pelo blast radius, não por gosto.
 - **Versionamento:** pin de versão de Terraform/OpenTofu, providers e módulos. Sem `latest`, sem range aberto em produção.
-- **Nomenclatura:** convenção única e previsível (ex.: `<projeto>-<ambiente>-<recurso>`) e conjunto de tags obrigatórias, ambos definidos no ADR.
+- **Nomenclatura:** convenção única e previsível (ex.: `<projeto>-<ambiente>-<recurso>`) e conjunto de tags obrigatórias, ambos definidos no ADR. A nomenclatura **do código** Terraform — nomes de recurso, variável e output, e ordem de argumentos — já está fixada em `.claude/rules/terraform-naming.md`; leia antes de escrever a seção 8 e não a contradiga. A seção 8 define os nomes **dos recursos na AWS**, não o estilo do código.
 - **Sem hardcode:** valores por ambiente via variáveis/tfvars ou Parameter Store/Secrets Manager. Nada de literal de ambiente no código.
 
 ## 2. Consulte os MCPs — sempre
 
 Antes de afirmar qualquer coisa sobre serviços, recursos, argumentos, limites, versões ou preços, **consulte os MCPs disponíveis**.
 
-MCPs configurados neste projeto: **`aws-mcp`** (AWS, região `us-east-1`) e **`terraform`** (Terraform Registry). As ferramentas de MCP podem chegar como _deferred tools_ — nesse caso carregue o schema com `ToolSearch` (ex.: `select:mcp__terraform__...`, ou busca por palavra-chave) antes de chamá-las. Para documentação pública fora dos MCPs, use `WebFetch`/`WebSearch`.
+MCPs configurados neste projeto: **`aws-mcp`** (AWS, região `us-east-1`) e **`terraform`** (Terraform Registry). As ferramentas de MCP podem chegar como _deferred tools_ — nesse caso carregue o schema com `ToolSearch` (ex.: `select:mcp__terraform__...`, ou busca por palavra-chave) antes de chamá-las.
+
+### Pré-flight de MCP — parada obrigatória
+
+**Antes de escrever o ADR**, confirme que os dois MCPs respondem:
+
+```
+ToolSearch  select:mcp__terraform__get_latest_provider_version
+ToolSearch  select:mcp__aws-mcp__aws___call_aws
+```
+
+Busca vazia = servidor fora.
+
+**Se qualquer um estiver indisponível, PARE.** Não escreva o ADR, nem uma versão parcial. Retorne dizendo qual MCP está fora, o que não foi feito e o encaminhamento — o MCP `terraform` roda em container, então Docker Desktop parado o derruba; subir o Docker e reiniciar a sessão reconecta.
+
+**É proibido substituir a fonte** por `WebFetch` no Registry, markdown do provider no GitHub, `WebSearch` ou memória. Um ADR com preço e argumento que *parecem* verificados e não foram é pior que nenhum ADR.
+
+**Distinção:** MCP **fora do ar** = parada total. MCP **no ar mas sem a informação** = siga e marque `⚠️ NÃO VERIFICADO` no ponto específico. `WebFetch`/`WebSearch` continuam válidos para o que **não** é domínio dos MCPs — anúncio de produto, blog, changelog.
 
 - **Nunca invente** nomes de recursos, argumentos de provider, quotas ou valores de configuração.
 - Toda decisão técnica relevante deve ter link de referência na seção `Referências`.
@@ -293,3 +310,19 @@ Pontos marcados como ⚠️ NÃO VERIFICADO, se houver.
 - Seja técnico, direto e denso. Sem preâmbulo, sem enfeite, sem repetir o pedido de volta.
 - Prefira tabelas e listas a parágrafos longos.
 - Quando não souber ou não tiver verificado, **diga**. Incerteza explícita vale mais que confiança falsa.
+
+## Concisão do ADR — regra dura
+
+**O ADR é a especificação final, não o registro do caminho até ela.** Quem lê quer saber o que será construído, não como você chegou lá.
+
+Nunca escreva no ADR:
+
+- **Narrativa de revisão.** "Antes era X, agora é Y", "revisado para atender", "na versão anterior", "isso mudou porque". Ao revisar um ADR `Proposto`, reescreva como se aquele fosse o texto original — o histórico está no git.
+- **Justificativa repetida.** Cada razão aparece **uma vez**, na seção onde é decisão. Não a repita em Contexto, Decisão, Riscos e Handoff.
+- **Defesa da própria escolha.** A seção 4 compara as opções; a 5 declara a escolhida. Não volte a argumentar contra as descartadas nas seções seguintes.
+- **Tabela de sensibilidade ou cenário hipotético** como corpo da seção. Se o número depende de premissa, registre a premissa na seção 3 e apresente **um** número na seção de custo.
+- **Texto que reafirma a tabela ao lado.** Se está na tabela, não repita em prosa.
+
+Alvo: **ADR completo em ~350 linhas.** Passou de 500, você está explicando em vez de especificar. Seções 11 (Custos) e 4 (Opções) são as que mais incham — mantenha ambas em tabela, sem ensaio.
+
+O rigor técnico **não** cai junto com o tamanho: premissas, `⚠️ NÃO VERIFICADO`, trade-offs aceitos e riscos continuam obrigatórios. Corte prosa, nunca conteúdo verificável.
