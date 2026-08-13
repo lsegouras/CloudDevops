@@ -56,6 +56,25 @@ Sintaxe de provider, nomes de argumento, versões, valores válidos de enum, quo
 
 MCPs configurados neste projeto: **`aws-mcp`** (AWS, região `us-east-1`) e **`terraform`** (Terraform Registry). As ferramentas de MCP podem chegar como _deferred tools_ — nesse caso carregue o schema com `ToolSearch` antes de chamá-las.
 
+### Pré-flight de MCP — parada obrigatória
+
+**Antes de escrever qualquer arquivo**, confirme que os dois MCPs respondem:
+
+```
+ToolSearch  select:mcp__terraform__get_latest_provider_version
+ToolSearch  select:mcp__aws-mcp__aws___call_aws
+```
+
+Busca vazia = servidor fora.
+
+**Se qualquer um estiver indisponível, PARE antes de começar.** Não escreva parcialmente, não entregue "o que dava para fazer sem ele".
+
+**É proibido substituir a fonte.** Nada de `WebFetch` no Registry, markdown do provider no GitHub, `WebSearch` ou o que você lembra. Fonte substituta produz código que *parece* verificado e não foi — o pior resultado possível, porque é indistinguível do correto na revisão e só aparece em produção.
+
+Retorne imediatamente com: qual MCP está fora, o que **não** foi feito, e o encaminhamento. Causa mais comum: o MCP `terraform` roda em container, então Docker Desktop parado o derruba — subir o Docker e reiniciar a sessão reconecta.
+
+**Distinção que importa:** MCP **fora do ar** = parada total, sem entrega. MCP **no ar mas sem a informação** = siga e marque `⚠️ NÃO VERIFICADO` no ponto específico.
+
 ## 2. Plan antes de apply, sempre
 
 - Rode `terraform plan` (ou `--dry-run`, `--diff`, `helm template`) e **apresente a saída** antes de qualquer mudança de estado.
@@ -170,15 +189,17 @@ Você tem um diretório de memória persistente que sobrevive entre conversas. C
 
 Siga o layout de diretórios e a convenção de nomenclatura definidos na seção 8 do ADR. Todo módulo Terraform precisa de `README.md`, `variables.tf` com `description` e `type`, `outputs.tf` e versões pinadas (provider e módulo).
 
+**Antes de escrever qualquer `.tf`, leia `.claude/rules/terraform-naming.md`** — é obrigatória e cobre nomenclatura de recursos, variáveis e outputs, além da ordem dos argumentos dentro do bloco. Se o ADR divergir dela em algum ponto, o ADR vence, mas registre a divergência no relatório.
+
 ## Pull Request
 
-**`gh` não está instalado neste ambiente.** Você não consegue abrir PR por CLI. Faça isto:
+`gh` **está** instalado (`C:\Program Files\GitHub CLI\gh.exe`). Confirme com `gh auth status` antes de usar — instalado não significa autenticado.
 
 1. Trabalhe em branch (`git checkout -b`).
 2. Commit e `git push -u origin <branch>`.
-3. Entregue o corpo do PR abaixo **como texto no relatório**, para o humano colar no GitHub.
+3. `gh pr create` é aceitável. **Nunca `gh pr merge`** — o merge é do humano, sem exceção.
 
-Se `gh` estiver disponível numa execução futura, `gh pr create` passa a ser aceitável — mas **nunca** `gh pr merge`.
+Se `gh auth status` falhar, não tente autenticar: entregue o corpo do PR abaixo **como texto no relatório**, para o humano colar no GitHub.
 
 ```markdown
 ## ADR-XXXX — <título>
