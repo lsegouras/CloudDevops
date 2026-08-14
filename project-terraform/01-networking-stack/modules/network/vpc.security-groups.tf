@@ -116,13 +116,9 @@ resource "aws_vpc_security_group_egress_rule" "eice_ssh" {
 # VPC inteira, e a origem e um SG — nenhum ingress a partir de CIDR existe neste
 # modulo, em nenhuma porta (ADR-0002 §9).
 #
-# CKV_AWS_24 ("no security groups allow ingress from 0.0.0.0:0 to port 22") FALHA
-# aqui e NAO foi suprimido — nao esta na lista nominal do ADR-0002 §5.3, e §5.3 e
-# explicito: achado sobre os SGs novos fora da lista e ESCALACAO, nao `skip`.
-# Aguardando decisao do Arquiteto.
-#
-# E falso positivo, e a causa esta medida, nao suposta. O check le apenas os
-# argumentos dos recursos LEGADOS — `security_groups` e `source_security_group_id`
+# CKV_AWS_24 ("no security groups allow ingress from 0.0.0.0:0 to port 22") falha
+# aqui por FALSO POSITIVO, e a causa esta medida, nao suposta. O check le apenas
+# os argumentos dos recursos LEGADOS — `security_groups` e `source_security_group_id`
 # — e nao conhece `referenced_security_group_id`, que e o argumento do recurso
 # moderno. Nao encontrando origem em nenhum dos dois, ele conclui "sem origem,
 # logo aberto ao mundo" e falha (checkov 3.3.10,
@@ -136,8 +132,14 @@ resource "aws_vpc_security_group_egress_rule" "eice_ssh" {
 # Ou seja: o check pune exatamente a decisao de seguranca do ADR-0002 §5.2 e
 # aprovaria a alternativa mais frouxa. Trocar a referencia de SG por CIDR deixaria
 # o relatorio verde e a conexao refem do valor de `preserve_client_ip` — que e o
-# defeito que esta emenda existe para eliminar. O achado fica vermelho.
+# defeito que esta emenda existe para eliminar. A troca esta VEDADA pelo §5.2, e
+# por isso o caminho aqui e a supressao, nao a reescrita da regra.
+#
+# O achado foi ESCALADO ao Arquiteto e ficou vermelho ate ser autorizado: a errata
+# de 2026-08-14 do ADR-0002 §5.3 acrescentou CKV_AWS_24 a lista nominal, com esta
+# mesma justificativa medida. So entao o `skip` abaixo foi aplicado.
 resource "aws_vpc_security_group_ingress_rule" "lab_ssh" {
+  #checkov:skip=CKV_AWS_24: falso positivo por forma de recurso nao modelada — o check le apenas `security_groups` e `source_security_group_id`, argumentos dos recursos LEGADOS, e desconhece `referenced_security_group_id`; sem origem nos campos que conhece, conclui "aberto ao mundo". Medido no fonte (AbsSecurityGroupUnrestrictedIngress.py, linhas 107-110) e em teste das tres variantes na porta 22: a referencia SG para SG falha e cidr_ipv4 = "10.0.0.0/24" passa — o check aprova a forma MAIS permissiva. A origem em SG e exigencia do ADR-0002 §5.2 e a troca por cidr_ipv4 esta vedada. Supressao autorizada nominalmente por ADR-0002 §5.3.
   security_group_id = aws_security_group.lab_access.id
 
   description                  = "SSH vindo do EC2 Instance Connect Endpoint (ADR-0002 §5.2)"
