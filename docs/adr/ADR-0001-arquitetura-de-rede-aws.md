@@ -7,7 +7,7 @@
 | **Aprovado em**  | 2026-08-12                                                             |
 | **Autor**        | Agente Arquiteto Cloud e DevOps                                        |
 | **Decisor**      | Laura                                                                  |
-| **Relacionados** | — (primeiro ADR do projeto). Bloqueia o futuro ADR de compute.         |
+| **Relacionados** | **Emendado por ADR-0002** (SGs de acesso e supressões checkov). Bloqueia o futuro ADR de compute. |
 | **Tags**         | aws, terraform, vpc, networking, nat-gateway, egress, workshop, finops |
 
 ---
