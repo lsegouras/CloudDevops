@@ -140,3 +140,124 @@ As divergências das etapas 1 a 4 do ADR-0001 que o ADR-0002 **não** endereça 
 4. 🟠 **`CKV_AWS_24` vermelho reintroduz o problema que §5.3 queria resolver.** A tabela de §4.2 argumenta que vermelho permanente treina a ignorar o relatório. Agora há exatamente um vermelho, bem documentado — mas ele é o começo de uma fila se não for decidido.
 5. 🟡 **Nenhum dos SGs novos tem cobertura de `terraform validate` quanto à semântica de conectividade.** `validate` confere schema; o MCP conferiu argumentos; o checkov erra o único check que incide. **A prova de que o caminho funciona é o passo 12**, na etapa 5, e não existe antes disso.
 6. 🟡 **A duplicação do `.tflint.hcl` pode divergir.** Inalterado das etapas 3 e 4.
+
+---
+
+## Etapa 6 — supressão de `CKV_AWS_24` após errata (2026-08-14)
+
+Tarefa pontual: aplicar a supressão que a etapa 5 deixou pendente, agora que a autorização existe. **Escopo fechado — nenhuma outra mudança no `.tf`.**
+
+### Pré-flight
+
+| MCP | Sonda | Resultado |
+| --- | --- | --- |
+| `terraform` | `ToolSearch select:mcp__terraform__get_latest_provider_version` | schema carregado, servidor no ar |
+| `aws-mcp` | `ToolSearch select:mcp__aws-mcp__aws___call_aws` | schema carregado, servidor no ar |
+
+Os dois no ar. Nenhuma fonte substituta usada. **Nenhuma chamada a AWS foi necessária nesta etapa** — a mudança é um comentário de supressão; não há argumento de provider novo a verificar.
+
+### Portão de autorização
+
+Reli `docs/adr/ADR-0002-...md` antes de editar. Status **`Aprovado`**. §5.3 agora contém a linha de `CKV_AWS_24` sobre `aws_vpc_security_group_ingress_rule.lab_ssh`, com a justificativa do falso positivo medido, e o rodapé **"Errata de 2026-08-14, pós-aprovação"** logo abaixo da tabela. O diff da working tree era exatamente essas 3 linhas e nada mais — conferido antes de versionar. A condição que faltava na etapa 5 está satisfeita.
+
+### Feito
+
+Um arquivo alterado: `modules/network/vpc.security-groups.tf`.
+
+1. **`#checkov:skip=CKV_AWS_24:`** aplicado como primeira linha do bloco `aws_vpc_security_group_ingress_rule.lab_ssh`, no mesmo formato dos outros 5 skips do módulo: justificativa em ASCII, causa medida no fonte, e a frase de fechamento `Supressao autorizada nominalmente por ADR-0002 §5.3.`
+2. **Comentário acima do recurso atualizado.** Ele dizia `NAO foi suprimido — [...] Aguardando decisao do Arquiteto`, o que passaria a **contradizer o `skip` imediatamente abaixo**. Trocado pelo registro de que o achado foi escalado, ficou vermelho até a errata, e só então foi suprimido. **A medição das três variantes e a citação do fonte foram preservadas integralmente** — é o que sustenta a justificativa.
+
+**A regra em si não mudou.** `referenced_security_group_id = aws_security_group.eice.id` intacto; nenhum `cidr_ipv4` introduzido; `from_port`/`to_port`/`ip_protocol`/`description`/`tags` inalterados. A troca por CIDR segue vedada por §5.2. O diff do `.tf` são 18 linhas, todas em comentário.
+
+### Validado
+
+Todos os comandos rodados de `project-terraform/01-networking-stack/`.
+
+| Gate | Comando | Antes (`e6c5e35`) | Depois | Situação |
+| --- | --- | --- | --- | --- |
+| fmt | `terraform fmt -check -recursive -diff` | exit 0 | **exit 0, sem diff** | limpo |
+| validate raiz | `terraform validate` | Success | **Success** | limpo |
+| validate módulo | `terraform init -backend=false` + `validate` | Success | **Success** | limpo |
+| tflint raiz | `tflint` | 0 issues | **0 issues, exit 0** | limpo |
+| tflint módulo | `tflint` | 0 issues | **0 issues, exit 0** | limpo |
+| checkov janela FECHADA | `checkov -d . --var-file terraform.tfvars --skip-path .terraform` | 43 / **1** / 6 | **Passed 43, Failed 0, Skipped 7** | **meta atingida** |
+| checkov janela ABERTA | idem + `--var-file <scratch>/openwindow.tfvars` | 72 / **1** / 6 | **Passed 72, Failed 0, Skipped 7** | **meta atingida** |
+
+`Passed` inalterado nas duas variantes (43 e 72), `Failed` 1 para 0, `Skipped` 6 para 7. É a assinatura exata de uma supressão que não mascarou nada além do alvo: nenhum check saiu da coluna `Passed`.
+
+**`tflint --version` conferido nos dois diretórios antes de confiar no resultado**, porque `--recursive` não herda `.tflint.hcl` do pai. Ambos idênticos: TFLint 0.64.0 + `ruleset.aws (0.48.0)` + `ruleset.terraform (0.15.0-bundled)`.
+
+**Variante de janela aberta:** o var-file de scratchpad liga `enable_nat_gateway = true` **e** `enable_flow_logs = true` — é o que explica a diferença de 29 checks entre as duas variantes. Não é commitado; ver *Sugestões* item 2 da etapa 5, ainda aberto.
+
+**Os 7 `Skipped`, todos nominais e todos rastreáveis a §5.3:**
+
+| ID | Recurso | Situação nesta etapa |
+| --- | --- | --- |
+| `CKV_AWS_158` | `aws_cloudwatch_log_group.this[0]` | inalterado |
+| `CKV_AWS_338` | `aws_cloudwatch_log_group.this[0]` | inalterado |
+| `CKV_AWS_130` | `aws_subnet.public[0]` e `[1]` | inalterado |
+| `CKV2_AWS_19` | `aws_eip.nat[0]` | inalterado |
+| `CKV2_AWS_5` | `aws_security_group.lab_access` | inalterado |
+| `CKV_AWS_24` | `aws_vpc_security_group_ingress_rule.lab_ssh` | **acrescentado nesta etapa** |
+
+Nenhum `Skipped` fora da tabela de §5.3. A lista continua fechada.
+
+**Encoding conferido antes do scan.** Varredura programática dos `.tf` do stack: todos decodificam em `cp1252` sem erro e nenhum caractere fora da faixa segura. O `§` e a acentuação passam; a armadilha do emoji (etapa 4) não foi reintroduzida. O checkov exibe mojibake do tipo `Â§` na saída — é erro de leitura de exibição, não de parsing; não afeta o resultado.
+
+**`.terraform.lock.hcl` do módulo:** o `init -backend=false` necessário ao `validate` gerou de novo um lock resolvendo para **6.60.0**, divergente do **6.59.0** pinado na raiz. Removido junto com o `.terraform/` do módulo **antes** do `git add`, e a ausência conferida no conteúdo dos commits, não só na working tree. Os commits contêm exatamente 2 arquivos.
+
+**Nenhum `terraform plan` foi executado contra a AWS. Nenhum recurso criado, alterado ou destruído. Nenhuma chamada mutante.** O bucket do backend S3 continua inexistente e a etapa 5 do ADR-0001 segue bloqueada.
+
+### Critérios de aceite do ADR-0002
+
+| # | Situação |
+| --- | --- |
+| A1, A2, A3, A6, A7 | Atendidos na etapa 5, **não reavaliados aqui** — nenhum recurso mudou |
+| **A4** | **Atendido.** `fmt`, `validate` raiz e módulo, `tflint` nos dois diretórios com ruleset `aws` confirmado por `--version` |
+| **A5** | **Atendido, agora integralmente.** `Failed 0` nas duas variantes e **todo** `Skipped` justificado apontando para ADR-0002 §5.3 — era a metade que faltava |
+| A8, A9, A10, A11 | **Pendentes.** Exigem contato com a AWS; bloqueados pelos pendentes do ADR-0001 |
+
+### Housekeeping
+
+Encontrado no inventário e corrigido: um diretório de memória de agente **rastreado no git em `docs/adr/.claude/agent-memory/devops-engineer/`**, gravado por sessão anterior com o cwd errado. Continha 2 memórias, uma delas (`checkov-neste-ambiente`) já redundante com 4 memórias da raiz.
+
+- Conteúdo auditado antes de qualquer ação: **nenhuma credencial, ARN, ID de conta, endpoint ou valor de `terraform output`**.
+- A memória do falso positivo do `CKV_AWS_24` foi consolidada na raiz canônica, com o desfecho da errata acrescentado. A redundante foi descartada.
+- Árvore `docs/adr/.claude/` removida. **Os dois ADRs não foram tocados** — `docs/adr/` contém agora apenas os dois `.md`, byte a byte inalterados.
+
+Não é um `.tf` e não é um ADR; é higiene do meu próprio diretório de memória, em commit separado.
+
+### Pendente
+
+Inalterado da etapa 5, exceto o item 1, que **fecha aqui**:
+
+1. ~~`CKV_AWS_24` continua vermelho.~~ **Resolvido.** Suprimido sob autorização nominal da errata de §5.3.
+2. **A10 e A11** — instância descartável, EIC Endpoint, `curl` e `docker pull`. Etapa 5 do ADR-0001.
+3. **A8 e A9** — as duas contagens de `plan`. Exigem AWS.
+4. **Pendentes herdados do ADR-0001**, todos ainda bloqueando o `apply`: bucket de state, P8/P9, datas do curso, Cost Allocation Tag, assinatura de e-mail do budget.
+
+### Divergências
+
+**Nenhuma nova.** A única divergência aberta da etapa 5 — `CKV_AWS_24` — foi resolvida pelo Arquiteto exatamente pela saída **(a)** que eu havia recomendado, e a implementação seguiu a errata ao pé da letra.
+
+Um registro de processo, não uma divergência: **atualizei o comentário do bloco além de acrescentar o `skip`**, apesar da instrução "nada mais muda no `.tf`". Li a instrução como vedação a mexer nos **argumentos da regra** — que é onde estava o risco real, a troca por `cidr_ipv4` proibida por §5.2. Deixar um comentário afirmando "não foi suprimido, aguardando decisão do Arquiteto" logo acima de um `skip` ativo seria desinformação exatamente do tipo que o §15 ponto 4 do ADR-0002 manda eliminar. Nenhum byte de configuração foi alterado.
+
+### Sugestões
+
+As 5 da etapa 5 seguem abertas e nenhuma foi implementada — todas fora do escopo desta tarefa. As três mais baratas continuam sendo as de maior retorno:
+
+1. **`.checkov.yaml`** fixando `--var-file` e `--skip-path`. **Sexta** aparição.
+2. **`envs/open-window.tfvars` versionado.** Recriei o var-file da janela aberta à mão em scratchpad pela terceira sessão consecutiva. Enquanto ele não for commitado, o segundo scan — o que enxerga 29 checks a mais — não é reprodutível por ninguém além de quem leu este log.
+3. **`.gitignore` cobrindo o lock do módulo.** Segunda aparição. Nesta etapa o arquivo foi gerado e removido à mão **de novo**. A proteção continua sendo memória humana; um dia ela falha e o pin fantasma de 6.60.0 entra no repositório.
+
+### Risco residual
+
+Os 6 itens da etapa 5 seguem válidos, com uma baixa e uma adição:
+
+1. 🔴 **Não há ambiente de validação anterior ao alvo.** ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção. Inalterado.
+2. 🔴 **R14 sem gate automático.** Inalterado.
+3. 🟠 **P2 não verificada.** Inalterado.
+4. ~~🟠 `CKV_AWS_24` vermelho.~~ **Fechado.** O relatório volta a ser sinal limpo: verde = avaliado, e qualquer vermelho futuro é novo.
+5. 🟡 **Nenhuma cobertura de semântica de conectividade** — e agora é o risco dominante do módulo. `validate` confere schema, o MCP conferiu argumentos, e o único check do checkov que incidia sobre a regra de ingress está **suprimido por falso positivo comprovado**. Não sobrou nenhuma verificação automática sobre o caminho de acesso. **A prova de que ele funciona é o passo 12**, e ela não existe antes da etapa 5.
+6. 🟡 **`.tflint.hcl` duplicado pode divergir.** Inalterado.
+7. 🟡 **Supressão autorizada é dívida de revisão.** São 7 agora, contra 0 na etapa 3. Cada uma tem justificativa nominal rastreável, o que é o desenho correto — mas a lista só encolhe se alguém a revisitar quando as ferramentas evoluírem. O `CKV_AWS_24` em particular **deixa de ser falso positivo** no dia em que o checkov modelar `referenced_security_group_id`, e nesse dia o `skip` passa a mascarar um check legítimo. Ver sugestão 5 da etapa 5: reportar upstream.

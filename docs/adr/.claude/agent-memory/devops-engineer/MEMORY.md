@@ -1,2 +1,0 @@
-- [Checkov neste ambiente](checkov-neste-ambiente.md) — `--var-file` obrigatório sob pena de falso negativo silencioso; lê `.tf` em cp1252 e morre com emoji.
-- [Falso positivo do CKV_AWS_24](checkov-ckv-aws-24-falso-positivo.md) — o check trata `referenced_security_group_id` como `0.0.0.0/0`; nunca troque por CIDR para silenciar.
