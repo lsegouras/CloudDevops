@@ -37,14 +37,13 @@ data "aws_partition" "current" {}
 # O nome foge do padrao <projeto>-<ambiente>-<tipo> de proposito, por decisao do
 # ADR-0001 §8: log group segue a convencao de caminho do CloudWatch.
 #
-# CKV_AWS_338 ("retains logs for at least 1 year") FALHA aqui e NAO foi suprimido.
-# A retencao de 7 dias e decisao explicita do ADR-0001 §10, justificada em §11.2
-# pelo fato de o custo ser de ingestao e nao de retencao — mas a tabela de
-# trade-offs aceitos do §5 nao lista este item, e so o §5 autoriza supressao.
-# Falha visivel de proposito, aguardando decisao do Arquiteto. Ver o relatorio da
-# etapa 4 em docs/implementation/ADR-0001-log.md.
+# CKV_AWS_338 ("retains logs for at least 1 year") era o achado escalado na etapa 4:
+# a retencao de 7 dias e decisao explicita do ADR-0001 §10, mas a tabela de §5
+# nao a listava, e so o §5 autorizava supressao. O ADR-0002 §5.3 fechou a lacuna
+# com uma lista nominal, e a supressao esta autorizada abaixo.
 resource "aws_cloudwatch_log_group" "this" {
   #checkov:skip=CKV_AWS_158: CMK do KMS no log group e trade-off aceito e escrito em ADR-0001 §5 — custo de chave mais key policy para proteger metadados de trafego sintetico de laboratorio. A criptografia gerenciada pela AWS permanece ativa.
+  #checkov:skip=CKV_AWS_338: o log group e destruido ao fechar a janela de custo (ADR-0001 §13) e seu tempo de vida e de HORAS — 7 dias de retencao ja excedem a existencia do recurso, e reter 1 ano descreveria um ciclo de dados que nao ocorre. O custo dos flow logs e de ingestao, nao de retencao (§11.2). Supressao autorizada nominalmente por ADR-0002 §5.3.
   count = var.enable_flow_logs ? 1 : 0
 
   name              = "/aws/vpc/${var.project_name}-${var.environment}/flow-logs"

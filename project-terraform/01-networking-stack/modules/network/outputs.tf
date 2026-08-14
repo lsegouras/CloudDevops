@@ -6,9 +6,15 @@
 # §14 nao lista mas sao a evidencia verificavel de que esses recursos existem (ou,
 # no caso dos flow logs, de que NAO existem com a janela de custo fechada).
 #
-# Os acrescimos nao sobem para a raiz da stack: outputs.tf da raiz declara
-# exatamente os 9 do criterio de aceite mais o budget, e mexer naquele contrato
-# nao e escopo desta etapa.
+# Os acrescimos da etapa 4 nao sobem para a raiz da stack: outputs.tf da raiz
+# declara exatamente os 9 do criterio de aceite mais o budget, e mexer naquele
+# contrato nao era escopo daquela etapa.
+#
+# EXCECAO, por ADR-0002 §7 etapa 3: os dois outputs de security group do caminho
+# de acesso sobem para a raiz. Nao e simetria — e necessidade operacional. O
+# `lab_access_security_group_id` precisa ser legivel por `terraform output` na
+# raiz, porque quem lanca a instancia descartavel do §7 passo 12 le dali, e nao
+# de dentro do modulo.
 
 output "vpc_id" {
   description = "The ID of the VPC"
@@ -96,6 +102,23 @@ output "ec2_instance_connect_endpoint_id" {
 output "default_security_group_id" {
   description = "The ID of the VPC default security group, managed with no ingress or egress rules at all and therefore unusable by design"
   value       = aws_default_security_group.this.id
+}
+
+# --- SGs do caminho de acesso (ADR-0002 §5.2) — custo US$ 0,00 ---------------
+
+output "eice_security_group_id" {
+  description = "The ID of the security group attached to the EC2 Instance Connect Endpoint, which allows egress on TCP/22 towards the lab access security group"
+  value       = aws_security_group.eice.id
+}
+
+# ESTE OUTPUT E OPERACIONAL, NAO DECORATIVO. A instancia descartavel do §7 passo
+# 12 nasce fora do Terraform e precisa receber este SG explicitamente no
+# lancamento (`--security-group-ids`). Sem isso ela cai no default SG vazio e o
+# teste de acesso falha do mesmo jeito que falhava antes desta emenda — e o risco
+# R14 do ADR-0002, e este output e a mitigacao dele.
+output "lab_access_security_group_id" {
+  description = "The ID of the lab access security group. Pass it explicitly when launching the disposable instance of ADR-0001 section 7 step 12, otherwise the instance lands in the empty default security group and is unreachable"
+  value       = aws_security_group.lab_access.id
 }
 
 # --- Flow logs — vazios no estado base, que e o de custo ZERO ----------------

@@ -13,6 +13,7 @@
 # nome ou ARN hardcoded dentro de modules/network.
 
 resource "aws_subnet" "public" {
+  #checkov:skip=CKV_AWS_130: map_public_ip_on_launch = true e exigencia do ADR-0001 §6 e criterio de aceite do §14; §9 registra que e habilitacao, nao exposicao — quem controla acesso e o security group. Supressao autorizada nominalmente por ADR-0002 §5.3. As subnets privadas passam neste mesmo check.
   count = length(var.availability_zones)
 
   vpc_id                  = aws_vpc.this.id

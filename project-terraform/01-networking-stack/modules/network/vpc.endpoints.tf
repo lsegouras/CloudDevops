@@ -74,16 +74,24 @@ resource "aws_vpc_endpoint_route_table_association" "s3_private" {
 # AZ do NAT e a recuperacao prevista em ADR-0001 R1, e nao ha razao para essa
 # troca recriar tambem o endpoint de acesso, que nao tem nada a ver com egress.
 #
-# ATENCAO — DIVERGENCIA REGISTRADA. Sem `security_group_ids`, a AWS associa o default
-# security group da VPC a este endpoint, e vpc.security-groups.tf esvazia esse SG
-# por decisao do ADR-0001 §9. A documentacao da AWS ("Security groups for EC2
-# Instance Connect Endpoint") exige regra de SAIDA na porta 22 em direcao as
-# instancias-alvo. O endpoint e criado normalmente, mas a conexao do passo 12 do
-# §7 falhara. Nenhum SG e criado aqui para resolver: o ADR-0001 §9 determina que
-# SG de aplicacao pertence ao ADR de compute, e escopo fechado vale mesmo quando o
-# resultado e uma lacuna conhecida. Item aberto para o Arquiteto.
+# `security_group_ids` EXPLICITO (ADR-0002 §5.2). Sem este argumento a AWS associa
+# o default security group da VPC ao endpoint — e vpc.security-groups.tf esvazia
+# esse SG por decisao do ADR-0001 §9. O endpoint era criado sem erro e a conexao
+# do §7 passo 12 falhava depois, em runtime. Era a divergencia escalada na etapa 4,
+# e o ADR-0002 a fecha com dois SGs dedicados, nao um: o default vazio quebrava o
+# caminho nos dois sentidos.
+#
+# `preserve_client_ip = false` EXPLICITO, e nao por omissao, porque as fontes
+# oficiais se contradizem sobre o default — verificado via MCP nesta sessao e na
+# do Arquiteto: a documentacao do provider Terraform declara `Default: true`, a do
+# CloudFormation e do CDK declaram `Default: false`. Deixar implicito faria o
+# comportamento depender de qual documento o leitor abriu (ADR-0002 R18). Com a
+# regra por referencia de SG o valor nao altera a conectividade — o que importa
+# aqui e o registro da ambiguidade.
 resource "aws_ec2_instance_connect_endpoint" "this" {
-  subnet_id = aws_subnet.private[0].id
+  subnet_id          = aws_subnet.private[0].id
+  security_group_ids = [aws_security_group.eice.id]
+  preserve_client_ip = false
 
   tags = {
     Name = "${var.project_name}-${var.environment}-eice-private-${substr(var.availability_zones[0], -2, -1)}"
