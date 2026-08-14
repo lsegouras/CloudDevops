@@ -549,3 +549,141 @@ As divergências abertas das etapas 1 e 2 **seguem abertas** e não as reabro. D
 3. 🟡 **O plugin `aws` não valida enum do schema.** Medido no controle positivo: `availability_mode = "zonalzinho"` passou. A cobertura é um conjunto curado de regras. O MCP segue obrigatório para escrever argumento — o plugin reduziu o risco, não o eliminou.
 4. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Inalterado das etapas anteriores; agora também nas tags das route tables e do NAT.
 5. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita. Repetido das etapas 1 e 2 porque continua valendo.
+
+---
+
+## Etapa 4 — Endpoints, default SG travado e VPC Flow Logs
+
+**Data:** 2026-08-14 · **Branch:** `feat/adr-0001-endpoints-and-flow-logs` (a partir de `main`, após o merge `095fd16` das etapas 1–3) · **ADR-0001 §7, passos 5, 6 e 8**
+
+Esta etapa **completa o código do módulo `network`**. Não sobra recurso do ADR-0001 §6 por escrever.
+
+### Pré-flight de MCP
+
+Os dois MCPs responderam com chamada real antes de qualquer arquivo ser escrito.
+
+| MCP | Sonda | Resultado |
+| --- | --- | --- |
+| `terraform` | `search_providers(hashicorp/aws, 6.59.0, vpc_endpoint, resources)` | 16 documentos retornados |
+| `aws-mcp` | `sts:GetCallerIdentity` | conta e usuário esperados |
+
+`get_latest_provider_version(hashicorp/aws)` segue respondendo `provider not found`, como já registrado na etapa 3. É falha daquele endpoint, **não** MCP fora do ar: `search_providers` e `get_provider_details` funcionaram normalmente na mesma sessão. Nenhuma fonte substituta foi usada.
+
+**Todo argumento verificado contra a versão 6.59.0**, a mesma do `.terraform.lock.hcl`, nunca `latest`:
+
+| Recurso / data source | O que a consulta decidiu |
+| --- | --- |
+| `aws_vpc_endpoint` | `vpc_endpoint_type` aceita `Gateway`; default é `Gateway`; a doc adverte que `route_table_ids` **conflita** com o recurso de associação separado |
+| `aws_vpc_endpoint_route_table_association` | `route_table_id` + `vpc_endpoint_id`, ambos obrigatórios |
+| `aws_ec2_instance_connect_endpoint` | `subnet_id` é o único argumento obrigatório; **sem `security_group_ids` a AWS associa o SG default da VPC** |
+| `aws_default_security_group` | adota o SG existente e remove **todas** as regras ao assumir a gestão |
+| `aws_cloudwatch_log_group` | `retention_in_days` aceita `7`; o atributo `arn` **já vem sem o sufixo `:*`** |
+| `aws_flow_log` | `log_destination_type` aceita `cloud-watch-logs`; `max_aggregation_interval` aceita `600` |
+| `aws_iam_role` / `aws_iam_role_policy` | `role` recebe o **name** da role; `inline_policy` está deprecado — usado o recurso separado |
+| `data.aws_iam_policy_document` | blocos `condition` com `test` / `variable` / `values`; `ArnLike` é `test` válido |
+| `data.aws_region` | **`region` é o atributo correto no provider 6.x — `name` e `id` estão deprecados** |
+| `data.aws_partition`, `data.aws_caller_identity` | `partition` e `account_id` |
+
+Uma consulta ao `aws-mcp` mudou o código: `ec2:DescribeVpcEndpointServices` mostrou que `com.amazonaws.us-east-1.s3` é oferecido nos **dois** tipos, `Gateway` **e** `Interface`. Omitir `vpc_endpoint_type` não daria erro de sintaxe — daria a fatura errada, US$ 0,01/h por AZ. O argumento foi escrito explícito por isso.
+
+Uma segunda consulta ao `aws-mcp` produziu a divergência principal desta etapa: a página *Security groups for EC2 Instance Connect Endpoint* exige regra de **saída na porta 22** no SG do endpoint. Ver *Divergências*.
+
+### Feito
+
+Três arquivos novos em `project-terraform/01-networking-stack/modules/network/`:
+
+| Arquivo | Recursos |
+| --- | --- |
+| `vpc.endpoints.tf` | `data.aws_region.current`, `aws_vpc_endpoint.s3` (Gateway), `aws_vpc_endpoint_route_table_association.s3_private` ×2, `aws_ec2_instance_connect_endpoint.this` |
+| `vpc.security-groups.tf` | `aws_default_security_group.this`, sem nenhum bloco `ingress`/`egress` |
+| `vpc.flow-logs.tf` | `data.aws_caller_identity.current`, `data.aws_partition.current`, `data.aws_iam_policy_document.assume_role`, `data.aws_iam_policy_document.this`, `aws_cloudwatch_log_group.this`, `aws_iam_role.this`, `aws_iam_role_policy.this`, `aws_flow_log.this` — **os 4 recursos sob o mesmo `count = var.enable_flow_logs ? 1 : 0`** |
+
+Mais `outputs.tf` do módulo (6 outputs novos) e `README.md` reescrito, que ainda descrevia o estado da etapa 2.
+
+Decisões de implementação que não são leitura direta do ADR:
+
+- **Gateway Endpoint associado pelo recurso separado**, não pelo argumento `route_table_ids` do `aws_vpc_endpoint`. A documentação do provider adverte que usar os dois caminhos gera conflito de associação, com uma sobrescrevendo a outra. ADR-0001 §15 ponto 4 nomeia o recurso separado.
+- **Nenhum Interface Endpoint de ECR**, conforme ADR-0001 §6 — os dois em 2 AZs custariam US$ 0,04/h, ou US$ 29,20/mês.
+- **EIC Endpoint na subnet privada de índice `[0]`, não em `var.nat_gateway_az`.** Hoje as duas apontam para a mesma AZ, mas são decisões independentes: trocar a AZ do NAT é a recuperação de **R1**, e não há razão para essa troca recriar também o endpoint de acesso, que nada tem a ver com egress.
+- **Os 4 recursos de flow log sob a mesma condição, não só o `aws_flow_log`.** Um log group vazio não custaria nada por existir, mas o critério de aceite de §14 é literal: `plan` sem variáveis não cria "nem log group, nem role".
+- **`logs:CreateLogGroup` omitida da policy.** O log group é criado pelo Terraform; conceder ao serviço o poder de criar log group seria permissão para algo que ele nunca faz. As três ações de escrita ficam presas a `"${log_group.arn}:*"` — o sufixo precisa ser concatenado à mão porque o provider já o remove do atributo `arn`.
+- **Região por `data.aws_region`, ARNs por `data.aws_partition` + `data.aws_caller_identity`.** Nenhum literal de região, conta ou ARN entrou no módulo, por §14.
+
+### Validado
+
+Todos os comandos rodados de `project-terraform/01-networking-stack/`.
+
+| Gate | Antes (HEAD `095fd16`) | Depois | Situação |
+| --- | --- | --- | --- |
+| `terraform fmt -recursive -check` | exit 0 | **exit 0** | limpo |
+| `terraform validate` raiz | Success | **Success** | limpo |
+| `terraform validate` módulo | Success | **Success** | limpo |
+| `tflint --recursive` | **2 issues**, exit 2 | **0 issues, exit 0** | **zerou** |
+| `checkov` var-file padrão | Passed 14, Failed 4, Skipped 0 | **Passed 19, Failed 2, Skipped 1** | 2 checks a menos falhando |
+| `checkov` com a janela aberta | Passed 15, Failed 5, Skipped 0 | **Passed 47, Failed 4, Skipped 1** | +32 passed |
+
+O baseline "antes" foi medido num `git worktree` descartável apontando para `095fd16`, não estimado.
+
+**Os 2 warnings do tflint zeraram**, que era o primeiro resultado esperado desta etapa:
+
+```
+terraform_unused_declarations · variable "enable_flow_logs"            -> resolvido
+terraform_unused_declarations · variable "flow_logs_retention_in_days" -> resolvido
+```
+
+`tflint --version` foi conferido **nos dois diretórios antes** de confiar no resultado, porque `--recursive` não herda `.tflint.hcl` do pai. Ambos carregaram `ruleset.aws (0.48.0)` + `ruleset.terraform (0.15.0-bundled)`. A cópia do `.tflint.hcl` dentro do módulo continua sendo carregada.
+
+**`CKV2_AWS_11` e `CKV2_AWS_12` passaram**, o segundo resultado esperado:
+
+```
+CKV2_AWS_11 "Ensure VPC flow logging is enabled in all VPCs"                    PASSED
+CKV2_AWS_12 "Ensure the default security group of every VPC restricts all traffic" PASSED
+```
+
+Detalhe que contraria a expectativa e vale registrar: **`CKV2_AWS_11` passou mesmo com `enable_flow_logs = false`**. Esperava-se que o `count = 0` fizesse o checkov descartar o `aws_flow_log` e manter o check vermelho. Não é o que acontece: os dois são checks de **grafo** ancorados no `aws_vpc`, e o grafo é montado sobre a configuração, não sobre a contagem resolvida. Ou seja, eles atestam que o código **prevê** flow logging e SG default travado — não que os recursos existam na conta. A prova de que existem é o `plan` da etapa 5.
+
+Achados restantes, nenhum introduzido por descuido:
+
+| Check | Onde | Situação |
+| --- | --- | --- |
+| `CKV_AWS_158` — log group sem CMK do KMS | `aws_cloudwatch_log_group.this` | **Suprimido.** É o único `checkov:skip` desta etapa. ADR-0001 §5 lista "CMK do KMS no log group" como trade-off aceito, e §7 etapa 10 autoriza suprimir exatamente o que §5 lista. Comentário no código aponta para o ADR. |
+| `CKV_AWS_338` — retenção mínima de 1 ano | `aws_cloudwatch_log_group.this` | **NÃO suprimido.** Ver *Divergências*. |
+| `CKV_AWS_130` ×2 — subnet atribui IP público | `aws_subnet.public` | Pré-existente da etapa 2, fora do escopo desta. |
+| `CKV2_AWS_19` — EIP não anexado a instância | `aws_eip.nat` | **NÃO suprimido**, continua aguardando decisão humana desde a etapa 3. |
+
+Cobertura real do checkov, medida e não presumida: nem no scan padrão nem no scan com a janela aberta aparecem `aws_vpc_endpoint`, `aws_vpc_endpoint_route_table_association`, `aws_ec2_instance_connect_endpoint`, `aws_default_security_group` ou `aws_flow_log` como recursos avaliados. **Não há check direto do checkov sobre nenhum dos cinco.** O que existe é a cobertura indireta de `CKV2_AWS_11` e `CKV2_AWS_12`, ancorados no `aws_vpc`. Três dos cinco recursos escritos nesta etapa não têm gate automático algum — a revisão humana do PR é a única barreira sobre eles.
+
+**Nenhum `terraform plan` foi executado contra a AWS e nenhum recurso foi criado**, conforme instrução da etapa. O bucket do backend S3 ainda não existe.
+
+### Pendente
+
+1. **Todos os critérios de aceite que exigem contato com a AWS** — os dois `plan` de contagem (4 recursos por flag), o `apply` do estado base, o segundo `plan` com "No changes", os outputs preenchidos e a validação funcional de egress. São a etapa 5, e dependem do bucket de state (ADR-0001 §7 passo 2), que segue inexistente.
+2. **Pré-requisitos 2, 5 e 6 do handoff** — resposta do professor a P8/P9, confirmação da assinatura de e-mail do budget e datas reais do curso. Continuam abertos desde a etapa 1; os valores assumidos em `terraform.tfvars` seguem marcados como pendentes no próprio arquivo.
+3. **Cost Allocation Tag `CostCenter` não ativada** no console de Billing. Sem isso o budget filtrado não enxerga nada.
+
+### Divergências
+
+As divergências abertas nas etapas 1, 2 e 3 **seguem abertas** e não as reabro. Três novas:
+
+1. 🔴 **O EIC Endpoint não vai conseguir conectar, e a causa são duas decisões do ADR que colidem.** ADR-0001 §6 pede um EC2 Instance Connect Endpoint em `private-1a`; §9 manda esvaziar o default security group da VPC; e §9 também determina que nenhum SG de aplicação seja criado nesta camada. Só que `aws_ec2_instance_connect_endpoint` sem `security_group_ids` recebe **o default SG da VPC** — o mesmo que acabou de ser esvaziado. A documentação da AWS (*Security groups for EC2 Instance Connect Endpoint*, consultada via `aws-mcp`) é explícita: o SG do endpoint **precisa** de regra de saída na porta 22 em direção às instâncias-alvo. O `apply` vai criar o endpoint sem erro nenhum; o que falha é o passo 12 de §7 — "acesso por EIC Endpoint" — e com ele o critério de aceite "o acesso a ela foi via EC2 Instance Connect Endpoint, sem IP público e sem bastion". **Não criei SG para resolver:** seria decidir arquitetura, e §9 diz que SG pertence ao ADR de compute. Implementei o ADR como escrito e trago a colisão. Três saídas possíveis, todas do Arquiteto: (a) autorizar um SG mínimo nesta camada, só para o endpoint, com egress TCP/22 para o CIDR da VPC; (b) manter o default SG esvaziado e mover o EIC Endpoint inteiro para o ADR de compute, junto com o SG dele; (c) deixar `map`ado como limitação conhecida e trocar o passo 12 por outro método de acesso. **Recomendo (a)** — é o menor delta, custa US$ 0,00, mantém o passo 12 executável e não antecipa nenhuma decisão de compute.
+
+2. 🟠 **`CKV_AWS_338` falha e não tenho autorização para suprimir.** O check exige retenção de no mínimo 1 ano; ADR-0001 §10 fixa **7 dias**, e §11.2 justifica bem — o custo dos flow logs é de ingestão, não de retenção (100 MB por 7 dias custam US$ 0,0007). A decisão é consciente e correta para este laboratório. O problema é formal: a tabela de trade-offs aceitos de §5 **não lista** a retenção curta, e §7 etapa 10 autoriza suprimir apenas o que está em §5. Deixei o check **falhando de propósito**, com comentário no código explicando por quê. Peço ao Arquiteto que decida: (a) acrescentar "retenção de 7 dias no log group de flow logs" à tabela de §5, o que me autoriza o `skip`; ou (b) manter o finding visível no relatório. **Recomendo (a)**, pelo mesmo raciocínio de `CKV2_AWS_19`.
+
+3. 🟡 **Nome do output `flow_log_cloudwatch_log_group_name`.** Pelo padrão `{name}_{type}_{attribute}` de `.claude/rules/terraform-naming.md`, com o recurso chamado `this` o prefixo cai e o nome seria `cloudwatch_log_group_name` — que não diz de qual log group se trata para quem lê de fora do módulo. Mantive o qualificador `flow_log_`. Divergência menor, registrada por completude; não pede ação.
+
+### Sugestões
+
+1. **`.checkov.yaml` fixando `--var-file` e `--skip-path`.** Terceira vez que aparece neste log. Esta etapa reforçou o custo: sem `--var-file` o scan não enxerga metade dos recursos, e a diferença entre Passed 19 e Passed 47 mostra quanto fica invisível quando as flags estão desligadas.
+2. **Um `.editorconfig` ou hook restringindo comentários `.tf` a ASCII.** O checkov 3.3.10 lê os arquivos como cp1252 neste Windows e **aborta com `UnicodeDecodeError`** diante do byte `0x8f`, que é parte do emoji `⚠️`. Custou uma rodada de depuração nesta etapa: o scan falhou inteiro, com exit 2, e a mensagem apontava para um offset de byte, não para o arquivo. Acentuação e `§` passam; emoji não.
+3. **Wrapper de validação** (Makefile/`justfile`/script) encadeando `fmt` → `validate` raiz → `validate` módulo → `tflint --recursive` → `checkov` nas duas variantes. Repetida da etapa 3; agora são 7 comandos.
+4. **Considerar um `aws_vpc_endpoint_policy` no Gateway Endpoint de S3.** Hoje o endpoint tem acesso total ao S3 por default. Restringi-lo aos buckets do ECR reduziria a superfície sem custo. Fora do escopo do ADR-0001; sugestão para o ADR de compute.
+
+### Risco residual
+
+1. 🔴 **A lacuna do EIC Endpoint é a mais consequente e não tem gate automático.** Não existe check de checkov nem regra de tflint sobre `aws_ec2_instance_connect_endpoint`. Nada além da divergência acima vai lembrar alguém disso antes do passo 12 falhar na prática.
+2. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. **Toda aplicação nesta stack é aplicação em produção** e exige plan revisado e aprovação humana explícita. Repetido das etapas 1, 2 e 3 porque continua valendo.
+3. 🟠 **Três dos cinco tipos de recurso escritos nesta etapa não têm cobertura de ferramenta.** Endpoints, EIC Endpoint e flow log passaram por `validate` (schema) e pelo MCP (argumentos), mas nenhum gate de segurança os avalia. A revisão humana do PR é a única barreira.
+4. 🟠 **`nat_gateway_az` inválida só falha quando a janela abre.** Inalterado da etapa 3. `count = 0` impede a avaliação do corpo do recurso, então `validate` e o `plan` do estado base passam limpos e o erro aparece no `apply -var="enable_nat_gateway=true"`.
+5. 🟠 **A duplicação do `.tflint.hcl` pode divergir.** Inalterado da etapa 3. Duas cópias do pin `0.48.0`; atualizar só uma devolve o módulo ao estado de falso-limpo.
+6. 🟡 **`CKV2_AWS_11` verde não significa flow logs ativos.** É check de grafo sobre a configuração. Com `enable_flow_logs = false` — o estado permanente do laboratório — **não há flow log nenhum na conta**, e o check continua verde. Quem ler o relatório do checkov sem esta nota vai concluir o contrário.
+7. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Inalterado; agora também na tag do EIC Endpoint.

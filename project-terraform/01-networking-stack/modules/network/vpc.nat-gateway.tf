@@ -14,6 +14,7 @@
 # correndo com nada funcionando — a falha mais silenciosa possivel aqui.
 
 resource "aws_eip" "nat" {
+  #checkov:skip=CKV2_AWS_19: o EIP esta anexado a um NAT Gateway via allocation_id, nao a uma instancia EC2 — o check nao modela essa associacao. Nao e EIP orfao: o risco de EIP orfao e o R6 do ADR-0001 e esta mitigado pelo count compartilhado com o NAT, logo abaixo. Supressao autorizada nominalmente por ADR-0002 §5.3.
   count = var.enable_nat_gateway ? 1 : 0
 
   domain = "vpc"
