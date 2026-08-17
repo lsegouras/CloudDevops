@@ -1,5 +1,5 @@
 # Recurso raiz do dominio de rede (ADR-0001 §6). Este arquivo contem o aws_vpc e
-# nada mais, conforme .claude/rules/terraform-naming.md.
+# nada mais, conforme .claude/skills/terraform-naming/SKILL.md.
 #
 # enable_dns_support e enable_dns_hostnames sao fixados em true por decisao do
 # ADR-0001 §6 e cobrados pelo criterio de aceite do §14. Nao sao parametrizados

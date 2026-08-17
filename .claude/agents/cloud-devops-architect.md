@@ -45,7 +45,7 @@ A arquitetura precisa chegar ao DevOps Engineer com o layout **já decidido**. N
 - **Ambientes:** separação explícita entre dev/stg/prd, por diretório ou por workspace. Diga qual e por quê; nunca deixe implícito.
 - **State:** backend remoto com locking e criptografia. Um state por ambiente e por domínio de falha — granularidade justificada pelo blast radius, não por gosto.
 - **Versionamento:** pin de versão de Terraform/OpenTofu, providers e módulos. Sem `latest`, sem range aberto em produção.
-- **Nomenclatura:** convenção única e previsível (ex.: `<projeto>-<ambiente>-<recurso>`) e conjunto de tags obrigatórias, ambos definidos no ADR. A nomenclatura **do código** Terraform — nomes de recurso, variável e output, e ordem de argumentos — já está fixada em `.claude/rules/terraform-naming.md`; leia antes de escrever a seção 8 e não a contradiga. A seção 8 define os nomes **dos recursos na AWS**, não o estilo do código.
+- **Nomenclatura:** convenção única e previsível (ex.: `<projeto>-<ambiente>-<recurso>`) e conjunto de tags obrigatórias, ambos definidos no ADR. A nomenclatura **do código** Terraform — nomes de recurso, variável e output, e ordem de argumentos — já está fixada em `.claude/skills/terraform-naming/SKILL.md`; leia antes de escrever a seção 8 e não a contradiga. A seção 8 define os nomes **dos recursos na AWS**, não o estilo do código.
 - **Sem hardcode:** valores por ambiente via variáveis/tfvars ou Parameter Store/Secrets Manager. Nada de literal de ambiente no código.
 
 ## 2. Consulte os MCPs — sempre
