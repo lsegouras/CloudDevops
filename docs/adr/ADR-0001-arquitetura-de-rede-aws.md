@@ -297,7 +297,7 @@ project-terraform/
         └── versions.tf                 # required_providers apenas (sem bloco provider)
 ```
 
-**Organização de arquivos:** um arquivo por grupo de componentes, no padrão `<domínio>.<componente>.tf`, conforme `.claude/rules/terraform-naming.md`. Módulo **não** tem `main.tf` — `vpc.tf` é a raiz do domínio. Recurso condicional fica no arquivo do seu componente, com o `count` nele. Cada recurso mora junto do que existe só para ele: rotas e associações com a sua route table, o Elastic IP com o NAT Gateway, e log group, IAM role e policy com o flow log.
+**Organização de arquivos:** um arquivo por grupo de componentes, no padrão `<domínio>.<componente>.tf`, conforme `.claude/skills/terraform-naming/SKILL.md`. Módulo **não** tem `main.tf` — `vpc.tf` é a raiz do domínio. Recurso condicional fica no arquivo do seu componente, com o `count` nele. Cada recurso mora junto do que existe só para ele: rotas e associações com a sua route table, o Elastic IP com o NAT Gateway, e log group, IAM role e policy com o flow log.
 
 **Ambientes:** separação **por diretório** (`envs/<ambiente>/`), não por workspace — workspaces compartilham configuração e backend key prefix, o que facilita aplicar no ambiente errado. Hoje só existe `prd`.
 

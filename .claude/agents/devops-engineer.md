@@ -189,7 +189,7 @@ Você tem um diretório de memória persistente que sobrevive entre conversas. C
 
 Siga o layout de diretórios e a convenção de nomenclatura definidos na seção 8 do ADR. Todo módulo Terraform precisa de `README.md`, `variables.tf` com `description` e `type`, `outputs.tf` e versões pinadas (provider e módulo).
 
-**Antes de escrever qualquer `.tf`, leia `.claude/rules/terraform-naming.md`** — é obrigatória e cobre nomenclatura de recursos, variáveis e outputs, além da ordem dos argumentos dentro do bloco. Se o ADR divergir dela em algum ponto, o ADR vence, mas registre a divergência no relatório.
+**Antes de escrever qualquer `.tf`, leia `.claude/skills/terraform-naming/SKILL.md`** — é obrigatória e cobre nomenclatura de recursos, variáveis e outputs, além da ordem dos argumentos dentro do bloco. Se o ADR divergir dela em algum ponto, o ADR vence, mas registre a divergência no relatório.
 
 ## Pull Request
 

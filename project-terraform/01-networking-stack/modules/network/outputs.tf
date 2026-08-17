@@ -56,7 +56,7 @@ output "private_route_table_ids" {
   value       = aws_route_table.private[*].id
 }
 
-# try() em vez de element(concat(...)) por .claude/rules/terraform-naming.md, e
+# try() em vez de element(concat(...)) por .claude/skills/terraform-naming/SKILL.md, e
 # string vazia em vez de null porque o criterio de aceite do ADR-0001 §14 pede
 # que estes outputs venham VAZIOS no estado base — vazio aqui e a evidencia de
 # que a janela de custo esta fechada, nao ausencia de informacao.

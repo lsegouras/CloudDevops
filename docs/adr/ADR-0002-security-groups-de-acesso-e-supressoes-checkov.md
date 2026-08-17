@@ -31,7 +31,7 @@ O `devops-engineer` implementou o ADR como escrito nos dois casos e escalou, o q
 
 - **Funcionais:** o passo 12 de §7 do ADR-0001 — acesso à instância descartável via EIC Endpoint, sem IP público e sem bastion, seguido de `curl` na API do ECR e `docker pull` — precisa ser executável · o relatório do checkov precisa distinguir achado aceito de achado não avaliado.
 - **Não funcionais:** custo adicional **US$ 0,00**, sem exceção · nenhuma alteração no estado default de custo zero do ADR-0001 · nenhum recurso novo com cobrança horária.
-- **Restrições:** teto de US$ 5,00 do curso inteiro (C1 do ADR-0001) · SG de **workload** continua pertencendo ao ADR de compute · `.claude/rules/terraform-naming.md` vale integralmente.
+- **Restrições:** teto de US$ 5,00 do curso inteiro (C1 do ADR-0001) · SG de **workload** continua pertencendo ao ADR de compute · `.claude/skills/terraform-naming/SKILL.md` vale integralmente.
 
 ---
 
@@ -198,7 +198,7 @@ Etapas do `devops-engineer`. Nenhuma toca a AWS: o bucket de state ainda não ex
 
 Inalterado em relação ao ADR-0001 §8, com a divergência de layout já determinada pela usuária: a raiz Terraform é `project-terraform/01-networking-stack/` e o módulo vive em `01-networking-stack/modules/network/`.
 
-Os SGs novos e suas regras vão **em `vpc.security-groups.tf`**, junto do `aws_default_security_group` — a regra de `.claude/rules/terraform-naming.md` manda o recurso e tudo que existe só para ele ficarem no mesmo arquivo, e o nome do arquivo já está no plural. Nenhum arquivo novo.
+Os SGs novos e suas regras vão **em `vpc.security-groups.tf`**, junto do `aws_default_security_group` — a regra de `.claude/skills/terraform-naming/SKILL.md` manda o recurso e tudo que existe só para ele ficarem no mesmo arquivo, e o nome do arquivo já está no plural. Nenhum arquivo novo.
 
 | Recurso AWS                                         | Identificador Terraform                          |
 | ---------------------------------------------------- | ------------------------------------------------ |

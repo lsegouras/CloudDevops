@@ -174,7 +174,7 @@ As outras 6 tags obrigatórias (`Project`, `Environment`, `ManagedBy`, `Owner`, 
 
 ## Convenções
 
-Nomenclatura, organização de arquivos e ordem de argumentos seguem [`.claude/rules/terraform-naming.md`](../../../../.claude/rules/terraform-naming.md): um arquivo por grupo de componentes no padrão `<domínio>.<componente>.tf`, `vpc.tf` contendo só o recurso raiz, `count` como primeiro argumento seguido de linha em branco, `tags` como último argumento real, `_` em identificadores HCL e `-` dentro de valores.
+Nomenclatura, organização de arquivos e ordem de argumentos seguem [`.claude/skills/terraform-naming/SKILL.md`](../../../../.claude/skills/terraform-naming/SKILL.md): um arquivo por grupo de componentes no padrão `<domínio>.<componente>.tf`, `vpc.tf` contendo só o recurso raiz, `count` como primeiro argumento seguido de linha em branco, `tags` como último argumento real, `_` em identificadores HCL e `-` dentro de valores.
 
 Módulo **não tem `main.tf`** — `vpc.tf` é a raiz do domínio.
 
