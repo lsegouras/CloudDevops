@@ -687,3 +687,93 @@ As divergências abertas nas etapas 1, 2 e 3 **seguem abertas** e não as reabro
 5. 🟠 **A duplicação do `.tflint.hcl` pode divergir.** Inalterado da etapa 3. Duas cópias do pin `0.48.0`; atualizar só uma devolve o módulo ao estado de falso-limpo.
 6. 🟡 **`CKV2_AWS_11` verde não significa flow logs ativos.** É check de grafo sobre a configuração. Com `enable_flow_logs = false` — o estado permanente do laboratório — **não há flow log nenhum na conta**, e o check continua verde. Quem ler o relatório do checkov sem esta nota vai concluir o contrário.
 7. 🟡 **O sufixo `1a`/`1b` pressupõe nome de AZ no formato `<região><letra>`.** Inalterado; agora também na tag do EIC Endpoint.
+
+---
+
+## 2026-08-19 — Etapa 5a: bootstrap da conta (§7 passos 1 e 2) e `plan` bloqueado
+
+Primeira etapa deste ADR que toca a AWS. Escopo autorizado pela usuária: **apenas** os passos 1 e 2 de §7. `terraform apply` explicitamente **não** autorizado — a contagem do `plan` seria revisada antes.
+
+**Pré-flight de MCP:** os dois responderam com chamada real antes de qualquer escrita. `terraform` → `get_latest_provider_version(hashicorp/aws)` = `6.60.0`. `aws-mcp` → `sts get-caller-identity` = conta `090413359726`. Nenhuma fonte substituta foi usada em nenhum ponto desta etapa.
+
+### Feito
+
+1. **§7 passo 1 — AWS Budget criado.** `budgets:CreateBudget` via `aws-mcp`, out-of-band, com os valores exatos de `budget.tf` + `terraform.tfvars`: teto US$ 5,00, `COST`, `ANNUALLY`, período 2026-08-01 → 2026-12-03, filtro `TagKeyValue = user:CostCenter$workshop-devops-ia`, as 4 notificações (40/60/80% `ACTUAL` e 100% `FORECASTED`) e as 7 tags via `ResourceTags`, para que um `import` futuro não gere diff.
+2. **§7 passo 2 — bucket de state criado.** Nome conforme §8. Quatro operações separadas: `create-bucket`, `put-bucket-versioning` (`Enabled`), `put-bucket-encryption` (SSE-S3 `AES256` com `BucketKeyEnabled`) e `put-public-access-block` (as 4 flags `true`). Acrescentei `put-bucket-tagging` com as 6 tags obrigatórias mais `Name` — sem a tag `CostCenter` o custo do bucket ficaria **fora** do filtro do budget que acabara de ser criado, e o critério de §14 pede as tags em todo recurso que as suporte.
+3. **Correção em `backend.tf`:** acrescentado `profile = "app_cloud_devops"`. Ver *Divergências* 2 — é defeito de implementação, não mudança de arquitetura.
+
+### Validado
+
+**Budget**, por leitura da API e não por presunção:
+
+| Verificação | Resultado |
+| --- | --- |
+| `describe-budget` | `BudgetLimit 5.0 USD`, `TimeUnit ANNUALLY`, período 2026-08-01 → 2026-12-03, `CostFilters` correto, `HealthStatus: HEALTHY` |
+| `describe-notifications-for-budget` | **4** notificações, todas `NotificationState: OK` |
+| `describe-subscribers-for-notification` (100% FORECASTED) | `EMAIL` → o endereço configurado em `terraform.tfvars` |
+
+**Bucket**, idem:
+
+| Verificação | Resultado |
+| --- | --- |
+| `get-bucket-versioning` | `Status: Enabled` |
+| `get-bucket-encryption` | `AES256`, `BucketKeyEnabled: true` |
+| `get-public-access-block` | as 4 flags `true` |
+
+**Gates estáticos**, todos reexecutados após a alteração do `backend.tf`:
+
+| Gate | Resultado |
+| --- | --- |
+| `terraform fmt -check -recursive` | exit 0 |
+| `terraform validate` | `Success! The configuration is valid.` |
+| `tflint` raiz | 0 issues — `ruleset.aws (0.48.0)` confirmado carregado |
+| `tflint` `modules/network` | 0 issues — `ruleset.aws (0.48.0)` confirmado carregado |
+| `checkov -d . --var-file terraform.tfvars --skip-path .terraform` | **Passed 43, Failed 0, Skipped 7** |
+
+**Confirmação de custo do estado base**, pedida explicitamente pela usuária. Item a item, contra fonte consultada via `aws-mcp` nesta data:
+
+| Recurso | Custo | Fonte |
+| --- | --- | --- |
+| VPC, subnets, IGW, route tables, security groups | **US$ 0,00** | Amazon VPC Pricing lista **o que é cobrado** numa VPC: NAT Gateway, IPAM, Network Analysis, IPv4 público, bloco IPv4 contíguo, Route Server, VPC Peering, ODB Peering e Encryption Controls. Nenhum dos recursos do estado base aparece. |
+| Gateway Endpoint de S3 | **US$ 0,00** | *Gateway endpoints*: "There is no additional charge for using gateway endpoints." |
+| EC2 Instance Connect Endpoint | **US$ 0,00** | *Connect using EC2 Instance Connect Endpoint*: "There is no additional cost for using EC2 Instance Connect Endpoints." **Com ressalva** — ver *Divergências* 4. |
+| AWS Budget (o 3º da conta) | **US$ 0,00** | AWS Budgets Pricing: "You can monitor and receive notifications on your budgets free of charge." A cobrança recai só sobre budgets **com ações** acima de 2 (US$ 0,10/dia) e sobre Budgets **Reports** (US$ 0,01 cada). Este budget não tem `aws_budgets_budget_action` e não é um report. |
+| Bucket de state | **< US$ 0,01 no curso** | Bucket vazio. As 5 requisições `PUT` desta etapa custam ~US$ 0,000025. |
+
+**Custo real incorrido nesta etapa: US$ 0,00** (arredondamento à casa do centavo). Nenhuma chamada ao Cost Explorer foi feita — só `describe-*`, `get-*` e `pricing get-products`, todas gratuitas.
+
+### Pendente
+
+1. 🔴 **`terraform init` com backend S3 e os três `plan` — BLOQUEADOS.** Não foi possível executá-los: a sessão do profile `app_cloud_devops` está **expirada**. `aws sts get-caller-identity --profile app_cloud_devops` retorna `Your session has expired. Please reauthenticate`. Este é o pré-requisito 3 do handoff de §15, e ele deixou de ser atendido. O comando de renovação é **interativo** — abre o console e não pode ser executado por um agente. Os três `plan` que eram o entregável desta etapa (critérios A8 e A9) **não foram produzidos e não há contagem para reportar**. Não estimei os números: contagem de `plan` que não rodou é invenção.
+2. 🔴 **`terraform import` do budget** antes do primeiro `apply` — ver *Divergências* 1.
+3. 🟠 **Assinatura de e-mail do budget.** As 4 notificações estão `OK` e o subscriber está registrado, mas a AWS cria uma assinatura SNS por trás e ela precisa ser aceita no e-mail. Enquanto não for, o alerta não chega. Verificável em SNS → Subscriptions, filtro `budget`, procurando `PendingConfirmation`.
+4. 🟠 **Cost Allocation Tag `CostCenter` não ativada.** Sem a ativação manual no console de Billing o filtro do budget não enxerga nada e o teto fica cego. Leva até 24 h para valer. Pendente desde a etapa 1.
+5. 🟡 Pré-requisitos 2 e 6 do handoff (P8/P9 com o professor; datas reais do curso) seguem abertos. O budget foi criado com as datas **assumidas** já registradas em `terraform.tfvars`.
+
+### Divergências
+
+As divergências abertas nas etapas anteriores seguem abertas. Cinco novas:
+
+1. 🔴 **§7 passo 1 e `budget.tf` gerenciam o mesmo recurso, e a ordem de §7 torna o conflito inevitável.** O passo 1 manda criar o budget "antes de qualquer recurso", sem depender de nada; o `terraform init` só acontece no passo 3 e o `apply` no passo 9. Logo o passo 1 **só pode** ser out-of-band — foi como o executei, e foi o que a usuária autorizou. Mas `budget.tf` declara `aws_budgets_budget.this`, então o primeiro `apply` vai tentar **criar de novo** um budget que já existe e falhar com `DuplicateRecordException`. A correção é um `terraform import` antes do apply, e import está na lista de operações que exigem aprovação humana explícita. O comando, com o formato `AccountID:BudgetName` confirmado no MCP:
+
+   `terraform import aws_budgets_budget.this 090413359726:dvn-workshop-budget-curso`
+
+   Criei o recurso com nome, valores e tags idênticos aos do código justamente para que esse import não produza diff. **Ao Arquiteto:** ou §7 passa a dizer que o passo 1 é out-of-band e inclui o import como passo explícito, ou o budget sai de `budget.tf` e vira infraestrutura de bootstrap junto do bucket. Recomendo a primeira — mantém o budget versionado.
+2. 🟠 **`backend.tf` não tinha `profile`, e por isso nunca funcionaria.** Bloco de backend **não herda** credencial do bloco `provider "aws"`. Sem `profile`, o backend cai na cadeia default do SDK; como `~/.aws/config` só define `[profile app_cloud_devops]` e não há profile `default`, a cadeia ia até o IMDS e falhava com `No valid credential sources found` / `no EC2 IMDS role found`. Medido: acrescentar o profile ao backend mudou a mensagem para `create oauth2 token: login session has expired` — prova de que o argumento é aceito e de que o profile passou a ser usado. Corrigi no código em vez de depender de um flag na linha de comando, pela mesma razão que levou à cópia do `.tflint.hcl`: gate que depende de alguém lembrar de um flag não é gate. §8 define bucket, key, região e locking, mas não menciona credencial do backend.
+3. 🟡 **§11.6 trata "2 budgets ativos" como limite de free tier; a página de pricing atual não impõe esse limite.** A conta já tinha **2 budgets** pré-existentes, criados fora deste ADR (um cost budget mensal e um zero-spend budget) — não constavam do inventário "conta vazia". O nosso é o **3º**. Há divergência entre as fontes da própria AWS: um blog de Cloud Financial Management afirma "60 free budget days per month... $0.02 per day" para budgets adicionais, enquanto a **página de pricing do produto** afirma que o monitoramento é gratuito e cobra apenas budgets **com ações**. Adotei a página de pricing, que é a fonte do produto. Se o blog valesse, o 3º budget custaria US$ 0,02/dia × ~106 dias até 2026-12-03 = **US$ 2,12**, ou 42% do teto — por isso a discrepância está registrada em vez de silenciada. Sugiro ao Arquiteto reconciliar §11.6.
+4. 🟡 **§11 não lista transferência de dados cross-AZ, e o passo 12 depende dela por construção.** VPC FAQ oficial: "If the instances reside in subnets in different Availability Zones, you will be charged **$0.01 per GB**" — e a documentação de CUR esclarece que se cobra **as duas pontas**, logo ~US$ 0,02/GB efetivo. O passo 12 põe a instância de teste em `private-1b` e acessa por um EIC Endpoint em `private-1a`, saindo por um NAT em `us-east-1a`: as duas pernas são cross-AZ, **de propósito**, para provar o roteamento. A documentação do EIC Endpoint diz isso na mesma frase em que declara o serviço gratuito. Magnitude real: tráfego SSH é de KBs e um `docker pull` de 100 MB custaria ~US$ 0,002. **Não é bloqueante nem muda a decisão** — é a tabela de §11.2 que está incompleta.
+5. 🟡 **A conta não está em US$ 0,00 de consumo.** `freetier get-account-plan-state` retorna `139.99` de crédito restante, contra os `140.00` registrados em §16 em 2026-08-12. O budget pré-existente que exclui créditos mostra `ActualSpend: 0.01`. O valor bate exatamente com **uma** requisição do Cost Explorer a US$ 0,01 — e §16 registra `ce:GetCostAndUsage` chamado na redação do ADR. Ou seja: o único gasto da conta até agora foi a ferramenta de medir gasto. Não afeta o teto de forma relevante; registrado porque o ADR afirma US$ 0,00 e isso deixou de ser exato.
+
+### Sugestões
+
+1. **Documentar a renovação de sessão como pré-requisito operacional recorrente.** O pré-requisito 3 de §15 trata o profile como algo que se verifica uma vez. Na prática é sessão de curta duração que expira sozinha e cuja renovação é interativa — ou seja, **bloqueia qualquer agente** de forma recorrente e silenciosa. Vale um passo "renovar sessão" no início de toda etapa que toque a AWS.
+2. **Decidir o destino dos dois budgets pré-existentes** se forem redundantes com o do ADR. Não toquei neles — estão fora do escopo autorizado e um deles é uma proteção ativa da conta.
+3. Repetidas das etapas anteriores e ainda válidas: `.checkov.yaml` fixando `--var-file`/`--skip-path`, hook de ASCII em comentário `.tf`, e wrapper de validação encadeando os gates (agora são 7 comandos).
+
+### Risco residual
+
+1. 🔴 **Há dois recursos na AWS que o Terraform não conhece.** Budget e bucket existem e nenhum dos dois está em state — o bucket por decisão de §8 (out-of-band é o correto: o backend não pode gerenciar o próprio storage), o budget por acidente de ordenação. Enquanto o import não acontecer, o primeiro `apply` **falha**. É a próxima coisa que quebra.
+2. 🔴 **A proteção de custo do budget é hoje nominal.** Duas condições faltam para ela funcionar: a Cost Allocation Tag `CostCenter` não está ativada — e sem ela o filtro `TagKeyValue` não casa com nada, deixando o budget medindo zero para sempre — e a assinatura de e-mail não está confirmada. **Um budget que mede zero nunca dispara.** As duas são ações manuais no console, e nenhuma delas tem gate automático.
+3. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção. Repetido de todas as etapas anteriores porque continua valendo.
+4. 🟠 **Os critérios A8 e A9 seguem inteiramente não verificados contra a AWS.** O código está verde em `validate`, `tflint` e `checkov`, mas nenhum deles conta recurso de `plan`. A afirmação "o estado base cria zero recursos tarifados" continua sendo leitura de código, não medição — e só o `plan` a converte em evidência.
+5. 🟠 **O budget entrou em produção sem nunca ter passado por `plan`.** Foi criado por chamada de API direta, com os valores transcritos à mão do código para o JSON da CLI. Conferi campo a campo com `describe-budget`, mas a transcrição não teve gate automático nenhum; um erro de digitação no filtro de tag teria produzido exatamente o mesmo `HEALTHY`.
