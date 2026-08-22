@@ -1,0 +1,39 @@
+module.network.aws_vpc_security_group_egress_rule.lab_dns_udp: Creating...
+module.network.aws_vpc_security_group_ingress_rule.lab_ssh: Creating...
+module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp: Creating...
+module.network.aws_vpc_security_group_egress_rule.lab_https: Creating...
+module.network.aws_vpc_security_group_egress_rule.eice_ssh: Creating...
+module.network.aws_vpc_security_group_ingress_rule.lab_ssh: Creation complete after 1s [id=sgr-0cb68ca7f7d84f40c]
+module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp: Creation complete after 1s [id=sgr-0467c464467532083]
+module.network.aws_vpc_security_group_egress_rule.eice_ssh: Creation complete after 1s [id=sgr-0dbcb50f31df7a7d3]
+module.network.aws_vpc_security_group_egress_rule.lab_https: Creation complete after 1s [id=sgr-008d26e265409d71d]
+module.network.aws_vpc_security_group_egress_rule.lab_dns_udp: Creation complete after 1s [id=sgr-0bbb0dd076ef7be11]
+
+Apply complete! Resources: 5 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b",
+]
+budget_name = "dvn-workshop-budget-curso"
+eice_security_group_id = "sg-088b923e21ccc6e1c"
+lab_access_security_group_id = "sg-0d99866953b4b32f3"
+nat_gateway_id = ""
+nat_public_ip = ""
+private_route_table_ids = [
+  "rtb-0a89c44f3c4e2baae",
+  "rtb-0560879026782c78a",
+]
+private_subnet_ids = [
+  "subnet-07edeed0263a0d1fa",
+  "subnet-0fafdef34d1941a49",
+]
+public_route_table_id = "rtb-0c231a9c6299a7468"
+public_subnet_ids = [
+  "subnet-0345391868626fe29",
+  "subnet-04f92f8abdda54f6d",
+]
+vpc_cidr_block = "10.0.0.0/24"
+vpc_id = "vpc-0a365fba18528a166"

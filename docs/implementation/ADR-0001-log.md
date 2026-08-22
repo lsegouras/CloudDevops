@@ -1032,3 +1032,110 @@ As divergências abertas nas etapas anteriores seguem abertas.
 ### Custo desta etapa
 
 **US$ 0,00.** Os 21 recursos criados são todos não tarifados por hora. Nenhuma chamada a `ce get-cost-and-usage`. Todas as verificações de conta foram `describe-*`, gratuitas.
+
+---
+
+## Etapa 5c (conclusão) — `apply` das 5 regras de security group — 2026-08-22
+
+**Resultado: completo. As 5 regras entraram, o estado base fechou em 26 de 26 recursos, e o critério de idempotência do §14 está atendido. Custo do estado final: US$ 0,00/hora.**
+
+### Feito
+
+**Pré-flight de MCP, com chamada real.** `mcp__terraform__get_latest_provider_version` (hashicorp/aws) devolveu `6.61.0`; `mcp__aws-mcp__aws___call_aws` com `sts get-caller-identity` devolveu a conta `090413359726`. Os dois no ar. Sessão local do profile `app_cloud_devops` verificada **antes** de investir trabalho — válida, e `init` autenticou no backend S3 sem erro.
+
+**Varredura de charset antes de mutar**, fechando a classe de falha que causou o apply parcial. Nenhum valor de `description` **dentro de bloco `resource`** contém não-ASCII. As ocorrências de `§` que restam no stack estão todas em `variables.tf` — descrições de **variável do Terraform**, metadado local que nunca chega à API — e foram deliberadamente preservadas. Confirmei a limpeza também no plan renderizado: os 5 valores que iriam à API foram inspecionados caractere a caractere, todos ASCII.
+
+**Reconfirmação do plan antes de mutar.** A contagem `5 to add, 0 to change, 0 to destroy` foi conferida, mas não sozinha — ela não distingue *quais* 5. Extraí as ações do plan em JSON (`terraform show -json`): **5 `create`, 22 `no-op`, zero `change`, zero `destroy`, zero `replace`**. Os 5 endereços são exatamente as regras que faltavam:
+
+```
+module.network.aws_vpc_security_group_egress_rule.eice_ssh
+module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp
+module.network.aws_vpc_security_group_egress_rule.lab_dns_udp
+module.network.aws_vpc_security_group_egress_rule.lab_https
+module.network.aws_vpc_security_group_ingress_rule.lab_ssh
+```
+
+Os 22 `no-op` são a prova positiva do que a instrução exigia: **nenhum dos recursos já existentes seria tocado.**
+
+Comparei ainda o corpo do plan novo contra `docs/implementation/plans/ADR-0001-plan-sg-rules-pendentes.txt`, que foi o texto revisado pela usuária. As **27 linhas de diferença são exclusivamente reordenação de linhas de log** `Reading...` e `Refreshing state...`, efeito de leitura concorrente de data sources e recursos. **Zero diferença de atributo.** O plan aplicado é o plan aprovado.
+
+**Apply.** Executado sobre o plan salvo com `-out`, e não como `terraform apply` livre: aplicar o arquivo garante que a mutação seja exatamente o conjunto reconfirmado, sem chance de um refresh intermediário introduzir algo que ninguém revisou. Sem `-var` — `enable_nat_gateway` e `enable_flow_logs` permaneceram `false`.
+
+```
+Apply complete! Resources: 5 added, 0 changed, 0 destroyed.
+```
+
+### Validado
+
+**1. Idempotência — o critério do §14 que ficou aberto na 5c está FECHADO.** Segundo `plan`, sem variáveis, com `-detailed-exitcode`:
+
+```
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+```
+
+`-detailed-exitcode` retornou **0** — sem mudança pendente. Usei o exit code em vez de ler o texto porque `0` e `2` são inequívocos, enquanto conferir a frase à vista aceita erro humano.
+
+**2. As duas regras SG↔SG usam referência de SG, não CIDR.** Esta é a verificação que **substitui a cobertura automática perdida** quando o `CKV_AWS_24` foi suprimido — o check está desligado nominalmente, então a garantia passou a ser esta consulta à conta. Lida de `describe-security-group-rules`, na conta, não do código:
+
+| Regra | SG dono | Direção | Porta | Origem/destino | CIDR |
+| --- | --- | --- | --- | --- | --- |
+| `sgr-0dbcb50f31df7a7d3` (eice_ssh) | `sg-088b...` (eice) | egress | tcp 22 | **RefSG `sg-0d99...`** (lab_access) | **ausente** |
+| `sgr-0cb68ca7f7d84f40c` (lab_ssh) | `sg-0d99...` (lab_access) | **ingress** | tcp 22 | **RefSG `sg-088b...`** (eice) | **ausente** |
+
+**Os dois apontam um para o outro**, exatamente como o ADR-0002 §5.2 exige. Os campos `CidrIpv4`, `CidrIpv6` e `PrefixListId` vêm **ausentes** da resposta da API nas duas — não vazios, ausentes — o que confirma que a origem é referência de SG e nada mais. É a propriedade que torna o caminho imune ao valor de `preserve_client_ip`.
+
+**`lab_ssh` é a única regra de ingress das duas SGs**, e sua origem é um SG. Nenhum ingress a partir de CIDR existe, em nenhuma porta.
+
+**3. As outras 3 regras**, todas egress em `lab_access`, conferidas na conta: `tcp 443 → 0.0.0.0/0` (ECR e camadas via endpoint de S3), `tcp 53 → 10.0.0.0/24` e `udp 53 → 10.0.0.0/24` (resolver da VPC, CIDR lido do recurso e não hardcoded — critério A7).
+
+**4. As 5 descriptions chegaram íntegras** e no formato por extenso: `(ADR-0002 secao 5.2)`. A EC2 API aceitou todas.
+
+**5. Nada tarifado existe.** Consultado na conta após o apply:
+
+| Verificação | Resultado |
+| --- | --- |
+| `describe-nat-gateways` (pending/available/deleting) | **vazio** |
+| `describe-addresses` (Elastic IPs) | **vazio** |
+| `describe-flow-logs` | **vazio** |
+| `describe-log-groups` (todos, sem filtro de prefixo) | **vazio** |
+| `describe-instances` (exceto terminated) | **vazio** |
+
+**6. State íntegro.** `terraform state list` traz **30 entradas** — as 25 anteriores mais as 5 regras — das quais 8 são de security group: o default esvaziado, os 2 SGs e as 5 regras. Nenhuma manipulação manual de state foi necessária em momento algum.
+
+**Custo do estado final: US$ 0,00/hora.** VPC, subnets, route tables, IGW, security groups, **regras de security group**, Gateway Endpoint de S3 e EIC Endpoint não são recursos tarifados por hora. Regra de SG não é tarifada em nenhuma quantidade. Nenhuma chamada a `ce get-cost-and-usage` foi feita; todas as verificações foram `describe-*`, gratuitas.
+
+### Pendente
+
+1. 🟠 **Etapa 5d não iniciada.** É ela que abre a janela de custo e exige **aprovação humana própria, separada desta** — a autorização desta etapa cobriu exclusivamente as 5 regras de SG. Nada de `enable_nat_gateway=true` nem `enable_flow_logs=true` foi executado aqui.
+2. 🟠 **Item 5 do handoff do ADR-0001 segue aberto:** a assinatura do tópico SNS do budget precisa ser confirmada por e-mail. Enquanto não for, os alertas de custo não chegam e a proteção é ilusória — o que pesa mais agora, porque a próxima etapa é justamente a que gera custo.
+3. 🟡 **Premissas P8/P9 do handoff** (datas do curso) continuam assumidas, não confirmadas com o professor.
+4. 🟡 **A premissa P2 do ADR-0002 continua NÃO VERIFICADA.** Não foi possível confirmar na documentação se regra de egress de SG se aplica ao resolver DNS da VPC. As duas regras de porta 53 entraram por precaução; se a premissa for falsa, são inócuas e gratuitas.
+
+### Divergências
+
+1. 🔴 **ABERTA — o exemplo de código do ADR-0002 §5.2, linha 224, prescreve uma `description` que a EC2 API rejeita.** A string `"SSH para as instancias do laboratorio (ADR-0002 §5.2)"` contém `§`, fora do conjunto aceito pela API (`a-z, A-Z, 0-9, espaço e ._-:/()#,@[]+=&;{}!$*`). Foi a causa de 5 de 26 recursos falharem num apply já aprovado. O código diverge do ADR neste ponto por impossibilidade técnica, deliberadamente, usando `secao 5.2`.
+
+   **Ao Arquiteto:** corrigir a linha 224 do ADR-0002 e, de preferência, acrescentar ao §8 do ADR-0001 (Nomenclatura) uma regra explícita de que valor de `description` de **recurso AWS** é ASCII restrito ao conjunto da API — distinguindo-o de `description` de **variável do Terraform**, que é livre e onde o `§` deve permanecer. Sem essa distinção, uma correção em massa produz falso positivo em todo o `variables.tf`.
+
+   Esta divergência **não bloqueou** a conclusão da etapa, mas permanece registrada porque o ADR ainda contém o exemplo defeituoso e alguém pode copiá-lo de novo.
+
+As divergências abertas nas etapas anteriores seguem abertas.
+
+### Sugestões
+
+1. **Um gate de lint que rejeite não-ASCII em valor de `description` de recurso** fecharia esta classe inteira antes do apply, e agora há evidência medida do custo de não tê-lo: `validate`, `tflint` e `checkov` passaram **os três limpos** sobre o código quebrado. O gate precisa distinguir `description` de recurso da de variável.
+2. Repetidas e ainda válidas: `.checkov.yaml` fixando `--var-file`, e wrapper encadeando os gates de validação.
+3. **Vale adotar `terraform show -json` na reconfirmação de plan como prática fixa.** Contar `create`/`no-op`/`change`/`destroy` sobre o JSON prova quais recursos são tocados; a linha `Plan: N to add` sozinha não distingue *quais* N, e foi o que permitiu que esta etapa afirmasse com segurança que os 22 existentes não seriam alterados.
+
+### Risco residual
+
+1. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção e recebe o tratamento correspondente: plan revisado, parada obrigatória, aprovação humana explícita. A etapa anterior mostrou o custo prático disso.
+2. 🟠 **A proteção de custo do budget ainda não foi vista funcionar** (herdado da 5b) — e a etapa 5d é a primeira que gera custo real. Confirmar a assinatura do SNS **antes** da 5d é o encaminhamento sensato.
+3. 🟡 **O caminho de acesso está completo no papel, mas nunca foi exercido.** As 5 regras existem e a topologia está correta, porém ninguém conectou de fato pelo EIC Endpoint. A validação de ponta a ponta é o §7 passo 12, na 5d. Até lá, "o caminho funciona" é inferência a partir da configuração, não observação.
+
+### Custo desta etapa
+
+**US$ 0,00.** As 5 regras de security group criadas não são recursos tarifados. Nenhuma chamada a `ce get-cost-and-usage`. Todas as verificações de conta foram `describe-*`, gratuitas.
