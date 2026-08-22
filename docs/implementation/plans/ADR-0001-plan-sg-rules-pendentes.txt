@@ -1,0 +1,175 @@
+module.network.data.aws_partition.current: Reading...
+module.network.aws_vpc.this: Refreshing state... [id=vpc-0a365fba18528a166]
+module.network.data.aws_caller_identity.current: Reading...
+module.network.data.aws_partition.current: Read complete after 0s [id=aws]
+module.network.data.aws_region.current: Reading...
+module.network.data.aws_region.current: Read complete after 0s [id=us-east-1]
+aws_budgets_budget.this: Refreshing state... [id=090413359726:dvn-workshop-budget-curso]
+module.network.data.aws_caller_identity.current: Read complete after 0s [id=090413359726]
+module.network.aws_default_security_group.this: Refreshing state... [id=sg-05b74e0722b71f5fb]
+module.network.aws_route_table.public: Refreshing state... [id=rtb-0c231a9c6299a7468]
+module.network.aws_internet_gateway.this: Refreshing state... [id=igw-0d7e60324d1822e50]
+module.network.aws_security_group.lab_access: Refreshing state... [id=sg-0d99866953b4b32f3]
+module.network.aws_vpc_endpoint.s3: Refreshing state... [id=vpce-07b11b8976eee35f0]
+module.network.aws_security_group.eice: Refreshing state... [id=sg-088b923e21ccc6e1c]
+module.network.aws_subnet.private[0]: Refreshing state... [id=subnet-07edeed0263a0d1fa]
+module.network.aws_route_table.private[1]: Refreshing state... [id=rtb-0560879026782c78a]
+module.network.aws_subnet.private[1]: Refreshing state... [id=subnet-0fafdef34d1941a49]
+module.network.aws_route_table.private[0]: Refreshing state... [id=rtb-0a89c44f3c4e2baae]
+module.network.aws_subnet.public[0]: Refreshing state... [id=subnet-0345391868626fe29]
+module.network.aws_subnet.public[1]: Refreshing state... [id=subnet-04f92f8abdda54f6d]
+module.network.aws_route.public: Refreshing state... [id=r-rtb-0c231a9c6299a74681080289494]
+module.network.aws_route_table_association.private[1]: Refreshing state... [id=rtbassoc-001c4fa138e64d829]
+module.network.aws_route_table_association.private[0]: Refreshing state... [id=rtbassoc-0b77ea93ac43266a0]
+module.network.aws_ec2_instance_connect_endpoint.this: Refreshing state... [id=eice-037ae13ba0ae84380]
+module.network.aws_route_table_association.public[0]: Refreshing state... [id=rtbassoc-0a916e6d76e158085]
+module.network.aws_route_table_association.public[1]: Refreshing state... [id=rtbassoc-0e19b1ae6412cd222]
+module.network.aws_vpc_endpoint_route_table_association.s3_private[0]: Refreshing state... [id=a-vpce-07b11b8976eee35f04210462106]
+module.network.aws_vpc_endpoint_route_table_association.s3_private[1]: Refreshing state... [id=a-vpce-07b11b8976eee35f01948577872]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.network.aws_vpc_security_group_egress_rule.eice_ssh will be created
+  + resource "aws_vpc_security_group_egress_rule" "eice_ssh" {
+      + arn                          = (known after apply)
+      + description                  = "SSH para as instancias do laboratorio (ADR-0002 secao 5.2)"
+      + from_port                    = 22
+      + id                           = (known after apply)
+      + ip_protocol                  = "tcp"
+      + referenced_security_group_id = "sg-0d99866953b4b32f3"
+      + region                       = "us-east-1"
+      + security_group_id            = "sg-088b923e21ccc6e1c"
+      + security_group_rule_id       = (known after apply)
+      + tags                         = {
+          + "Name" = "dvn-workshop-prd-sgr-eice-ssh"
+        }
+      + tags_all                     = {
+          + "ADR"         = "ADR-0001"
+          + "CostCenter"  = "workshop-devops-ia"
+          + "Environment" = "prd"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "dvn-workshop-prd-sgr-eice-ssh"
+          + "Owner"       = "laura"
+          + "Project"     = "dvn-workshop"
+        }
+      + to_port                      = 22
+    }
+
+  # module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp will be created
+  + resource "aws_vpc_security_group_egress_rule" "lab_dns_tcp" {
+      + arn                    = (known after apply)
+      + cidr_ipv4              = "10.0.0.0/24"
+      + description            = "DNS TCP para o resolver da VPC, respostas acima de 512 bytes (ADR-0002 secao 5.2, premissa P2)"
+      + from_port              = 53
+      + id                     = (known after apply)
+      + ip_protocol            = "tcp"
+      + region                 = "us-east-1"
+      + security_group_id      = "sg-0d99866953b4b32f3"
+      + security_group_rule_id = (known after apply)
+      + tags                   = {
+          + "Name" = "dvn-workshop-prd-sgr-lab-dns-tcp"
+        }
+      + tags_all               = {
+          + "ADR"         = "ADR-0001"
+          + "CostCenter"  = "workshop-devops-ia"
+          + "Environment" = "prd"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "dvn-workshop-prd-sgr-lab-dns-tcp"
+          + "Owner"       = "laura"
+          + "Project"     = "dvn-workshop"
+        }
+      + to_port                = 53
+    }
+
+  # module.network.aws_vpc_security_group_egress_rule.lab_dns_udp will be created
+  + resource "aws_vpc_security_group_egress_rule" "lab_dns_udp" {
+      + arn                    = (known after apply)
+      + cidr_ipv4              = "10.0.0.0/24"
+      + description            = "DNS UDP para o resolver da VPC (ADR-0002 secao 5.2, premissa P2)"
+      + from_port              = 53
+      + id                     = (known after apply)
+      + ip_protocol            = "udp"
+      + region                 = "us-east-1"
+      + security_group_id      = "sg-0d99866953b4b32f3"
+      + security_group_rule_id = (known after apply)
+      + tags                   = {
+          + "Name" = "dvn-workshop-prd-sgr-lab-dns-udp"
+        }
+      + tags_all               = {
+          + "ADR"         = "ADR-0001"
+          + "CostCenter"  = "workshop-devops-ia"
+          + "Environment" = "prd"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "dvn-workshop-prd-sgr-lab-dns-udp"
+          + "Owner"       = "laura"
+          + "Project"     = "dvn-workshop"
+        }
+      + to_port                = 53
+    }
+
+  # module.network.aws_vpc_security_group_egress_rule.lab_https will be created
+  + resource "aws_vpc_security_group_egress_rule" "lab_https" {
+      + arn                    = (known after apply)
+      + cidr_ipv4              = "0.0.0.0/0"
+      + description            = "HTTPS para a API do ECR e para as camadas de imagem via endpoint de S3 (ADR-0002 secao 5.2)"
+      + from_port              = 443
+      + id                     = (known after apply)
+      + ip_protocol            = "tcp"
+      + region                 = "us-east-1"
+      + security_group_id      = "sg-0d99866953b4b32f3"
+      + security_group_rule_id = (known after apply)
+      + tags                   = {
+          + "Name" = "dvn-workshop-prd-sgr-lab-https"
+        }
+      + tags_all               = {
+          + "ADR"         = "ADR-0001"
+          + "CostCenter"  = "workshop-devops-ia"
+          + "Environment" = "prd"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "dvn-workshop-prd-sgr-lab-https"
+          + "Owner"       = "laura"
+          + "Project"     = "dvn-workshop"
+        }
+      + to_port                = 443
+    }
+
+  # module.network.aws_vpc_security_group_ingress_rule.lab_ssh will be created
+  + resource "aws_vpc_security_group_ingress_rule" "lab_ssh" {
+      + arn                          = (known after apply)
+      + description                  = "SSH vindo do EC2 Instance Connect Endpoint (ADR-0002 secao 5.2)"
+      + from_port                    = 22
+      + id                           = (known after apply)
+      + ip_protocol                  = "tcp"
+      + referenced_security_group_id = "sg-088b923e21ccc6e1c"
+      + region                       = "us-east-1"
+      + security_group_id            = "sg-0d99866953b4b32f3"
+      + security_group_rule_id       = (known after apply)
+      + tags                         = {
+          + "Name" = "dvn-workshop-prd-sgr-lab-ssh"
+        }
+      + tags_all                     = {
+          + "ADR"         = "ADR-0001"
+          + "CostCenter"  = "workshop-devops-ia"
+          + "Environment" = "prd"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "dvn-workshop-prd-sgr-lab-ssh"
+          + "Owner"       = "laura"
+          + "Project"     = "dvn-workshop"
+        }
+      + to_port                      = 22
+    }
+
+Plan: 5 to add, 0 to change, 0 to destroy.
+
+─────────────────────────────────────────────────────────────────────────────
+
+Saved the plan to:
+C:/Users/lause/AppData/Local/Temp/claude/d--CloudDevops/375a5579-9072-4606-ba2a-110af7689ced/scratchpad/resto.tfplan
+
+To perform exactly these actions, run the following command to apply:
+    terraform apply "C:/Users/lause/AppData/Local/Temp/claude/d--CloudDevops/375a5579-9072-4606-ba2a-110af7689ced/scratchpad/resto.tfplan"
+Releasing state lock. This may take a few moments...

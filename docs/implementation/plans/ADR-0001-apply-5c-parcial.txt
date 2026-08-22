@@ -1,0 +1,145 @@
+module.network.aws_vpc.this: Creating...
+module.network.aws_vpc.this: Creation complete after 4s [id=vpc-0a365fba18528a166]
+module.network.aws_subnet.private[0]: Creating...
+module.network.aws_internet_gateway.this: Creating...
+module.network.aws_route_table.private[1]: Creating...
+module.network.aws_route_table.public: Creating...
+module.network.aws_vpc_endpoint.s3: Creating...
+module.network.aws_default_security_group.this: Creating...
+module.network.aws_security_group.eice: Creating...
+module.network.aws_subnet.public[1]: Creating...
+module.network.aws_security_group.lab_access: Creating...
+module.network.aws_subnet.public[0]: Creating...
+module.network.aws_route_table.private[1]: Creation complete after 1s [id=rtb-0560879026782c78a]
+module.network.aws_route_table.private[0]: Creating...
+module.network.aws_subnet.private[0]: Creation complete after 1s [id=subnet-07edeed0263a0d1fa]
+module.network.aws_subnet.private[1]: Creating...
+module.network.aws_internet_gateway.this: Creation complete after 1s [id=igw-0d7e60324d1822e50]
+module.network.aws_route_table.public: Creation complete after 1s [id=rtb-0c231a9c6299a7468]
+module.network.aws_route.public: Creating...
+module.network.aws_route_table.private[0]: Creation complete after 1s [id=rtb-0a89c44f3c4e2baae]
+module.network.aws_subnet.private[1]: Creation complete after 1s [id=subnet-0fafdef34d1941a49]
+module.network.aws_route_table_association.private[1]: Creating...
+module.network.aws_route_table_association.private[0]: Creating...
+module.network.aws_default_security_group.this: Creation complete after 3s [id=sg-05b74e0722b71f5fb]
+module.network.aws_route.public: Creation complete after 2s [id=r-rtb-0c231a9c6299a74681080289494]
+module.network.aws_route_table_association.private[0]: Creation complete after 1s [id=rtbassoc-0b77ea93ac43266a0]
+module.network.aws_route_table_association.private[1]: Creation complete after 1s [id=rtbassoc-001c4fa138e64d829]
+module.network.aws_security_group.eice: Creation complete after 3s [id=sg-088b923e21ccc6e1c]
+module.network.aws_ec2_instance_connect_endpoint.this: Creating...
+module.network.aws_security_group.lab_access: Creation complete after 3s [id=sg-0d99866953b4b32f3]
+module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp: Creating...
+module.network.aws_vpc_security_group_egress_rule.eice_ssh: Creating...
+module.network.aws_vpc_security_group_ingress_rule.lab_ssh: Creating...
+module.network.aws_vpc_security_group_egress_rule.lab_dns_udp: Creating...
+module.network.aws_vpc_security_group_egress_rule.lab_https: Creating...
+module.network.aws_vpc_endpoint.s3: Creation complete after 7s [id=vpce-07b11b8976eee35f0]
+module.network.aws_vpc_endpoint_route_table_association.s3_private[0]: Creating...
+module.network.aws_vpc_endpoint_route_table_association.s3_private[1]: Creating...
+module.network.aws_vpc_endpoint_route_table_association.s3_private[1]: Creation complete after 1s [id=a-vpce-07b11b8976eee35f01948577872]
+module.network.aws_vpc_endpoint_route_table_association.s3_private[0]: Creation complete after 1s [id=a-vpce-07b11b8976eee35f04210462106]
+module.network.aws_subnet.public[1]: Still creating... [00m10s elapsed]
+module.network.aws_subnet.public[0]: Still creating... [00m10s elapsed]
+module.network.aws_subnet.public[0]: Creation complete after 12s [id=subnet-0345391868626fe29]
+module.network.aws_subnet.public[1]: Creation complete after 12s [id=subnet-04f92f8abdda54f6d]
+module.network.aws_route_table_association.public[1]: Creating...
+module.network.aws_route_table_association.public[0]: Creating...
+module.network.aws_route_table_association.public[1]: Creation complete after 1s [id=rtbassoc-0e19b1ae6412cd222]
+module.network.aws_route_table_association.public[0]: Creation complete after 1s [id=rtbassoc-0a916e6d76e158085]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [00m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [00m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [00m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [00m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [00m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [01m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [02m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [03m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [04m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m10s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m20s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m30s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m40s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [05m50s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Still creating... [06m00s elapsed]
+module.network.aws_ec2_instance_connect_endpoint.this: Creation complete after 6m2s [id=eice-037ae13ba0ae84380]
+
+Error: creating VPC Security Group Rule
+
+  with module.network.aws_vpc_security_group_egress_rule.eice_ssh,
+  on modules\network\vpc.security-groups.tf line 101, in resource "aws_vpc_security_group_egress_rule" "eice_ssh":
+ 101: resource "aws_vpc_security_group_egress_rule" "eice_ssh" {
+
+operation error EC2: AuthorizeSecurityGroupEgress, https response error
+StatusCode: 400, RequestID: e0d63381-07c7-4085-802a-d54d09a67801, api error
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9.
+_-:/()#,@[]+=&;{}!$*
+
+Error: creating VPC Security Group Rule
+
+  with module.network.aws_vpc_security_group_ingress_rule.lab_ssh,
+  on modules\network\vpc.security-groups.tf line 141, in resource "aws_vpc_security_group_ingress_rule" "lab_ssh":
+ 141: resource "aws_vpc_security_group_ingress_rule" "lab_ssh" {
+
+operation error EC2: AuthorizeSecurityGroupIngress, https response error
+StatusCode: 400, RequestID: 37295c03-2072-4384-8790-66d81742e0ba, api error
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9.
+_-:/()#,@[]+=&;{}!$*
+
+Error: creating VPC Security Group Rule
+
+  with module.network.aws_vpc_security_group_egress_rule.lab_https,
+  on modules\network\vpc.security-groups.tf line 166, in resource "aws_vpc_security_group_egress_rule" "lab_https":
+ 166: resource "aws_vpc_security_group_egress_rule" "lab_https" {
+
+operation error EC2: AuthorizeSecurityGroupEgress, https response error
+StatusCode: 400, RequestID: 6aeff92d-dfee-457c-8153-86b26cefdef3, api error
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9.
+_-:/()#,@[]+=&;{}!$*
+
+Error: creating VPC Security Group Rule
+
+  with module.network.aws_vpc_security_group_egress_rule.lab_dns_udp,
+  on modules\network\vpc.security-groups.tf line 192, in resource "aws_vpc_security_group_egress_rule" "lab_dns_udp":
+ 192: resource "aws_vpc_security_group_egress_rule" "lab_dns_udp" {
+
+operation error EC2: AuthorizeSecurityGroupEgress, https response error
+StatusCode: 400, RequestID: 6577ced2-03af-464d-81a0-d74370f93da7, api error
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9.
+_-:/()#,@[]+=&;{}!$*
+
+Error: creating VPC Security Group Rule
+
+  with module.network.aws_vpc_security_group_egress_rule.lab_dns_tcp,
+  on modules\network\vpc.security-groups.tf line 206, in resource "aws_vpc_security_group_egress_rule" "lab_dns_tcp":
+ 206: resource "aws_vpc_security_group_egress_rule" "lab_dns_tcp" {
+
+operation error EC2: AuthorizeSecurityGroupEgress, https response error
+StatusCode: 400, RequestID: 5ee8b99a-71f8-407a-ae4e-e91cdd826427, api error
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9.
+_-:/()#,@[]+=&;{}!$*

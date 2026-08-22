@@ -949,3 +949,86 @@ As divergências abertas nas etapas anteriores seguem abertas, **exceto a nº 1 
 ### Custo desta etapa
 
 **US$ 0,00.** O `import` não cria recurso. Os três `plan` são leitura. Todas as chamadas de AWS foram `sts get-caller-identity`, `budgets describe-budget`, `ce list-cost-allocation-tags` e `sns list-subscriptions` — todas gratuitas. **Nenhuma chamada a `ce get-cost-and-usage`** (US$ 0,01 cada); `list-cost-allocation-tags` pertence ao namespace `ce` mas não é operação tarifada do Cost Explorer, que cobra por requisição de `GetCostAndUsage` e afins.
+
+---
+
+## Etapa 5c — `apply` do estado base (§7 passo 9) — 2026-08-22
+
+**Resultado: parcial. 21 dos 26 recursos criados; 5 falharam pela mesma causa. O state ficou consistente e nada tarifado existe na conta.**
+
+### Feito
+
+**Pré-flight de MCP, com chamada real.** `mcp__terraform__get_latest_provider_version` (hashicorp/aws) devolveu `6.61.0`; `mcp__aws-mcp__aws___call_aws` com `sts get-caller-identity` devolveu a conta. Os dois no ar. Sessão local do profile `app_cloud_devops` verificada **antes** de investir trabalho, conforme a armadilha registrada — válida.
+
+**Reconfirmação do plan antes de mutar.** Não bastou conferir a contagem. Comparei o plan novo com `docs/implementation/plans/ADR-0001-plan-base.txt`, aprovado na 5b, em três níveis: a linha `Plan:` (`26 to add, 0 to change, 0 to destroy` nos dois), os 26 endereços de recurso (`diff` vazio) e o corpo inteiro das linhas 1-614. As **únicas** diferenças do corpo foram um BOM de encoding no arquivo salvo e a ordem de duas linhas de log de leituras concorrentes de data source — zero diferença de atributo. Só então apliquei.
+
+**Apply.** Executado sobre um plan salvo com `-out`, para que a mutação fosse exatamente o conjunto verificado e nada além. Sem `-var`: `enable_nat_gateway` e `enable_flow_logs` permaneceram nos defaults `false`.
+
+Entraram **21 recursos**: a VPC, o IGW, as 4 subnets, as 3 route tables, as 4 associações, a rota pública, o Gateway Endpoint de S3 e suas 2 associações, o EIC Endpoint, o default SG esvaziado e os 2 SGs de acesso.
+
+### A falha, e a causa
+
+As 5 regras de security group falharam, todas com o mesmo erro da EC2 API:
+
+```
+InvalidParameterValue: Invalid rule description. Valid descriptions are
+strings less than 256 characters from the following set:  a-zA-Z0-9._-:/()#,@[]+=&;{}!$*
+```
+
+**Causa: o caractere `§` no valor de `description`.** Confirmada na documentação da AWS via `aws-mcp` (`IpRange.description` / `Ipv6Range.description`: "Allowed characters are a-z, A-Z, 0-9, spaces, and `._-:/()#,@[]+=&;{}!$*`"), não suposta de memória. O `§` não pertence ao conjunto.
+
+A correlação é exata e explica por que a falha foi seletiva: as 5 regras tinham `(ADR-0002 §5.2)` na descrição e as 5 falharam; os 2 `aws_security_group` nunca tiveram `§` e os 2 passaram. O texto não foi invenção da implementação — **é cópia literal do exemplo de código do ADR-0002 §5.2, linha 224**, que prescreve uma string que a API rejeita.
+
+**Correção aplicada:** `§5.2` passou a `secao 5.2` nos 5 valores de `description`. Nada mais mudou — nem porta, nem protocolo, nem origem, nem CIDR, nem referência de SG. A semântica de segurança das 5 regras é idêntica à aprovada, e o critério A3 do ADR-0002 ("toda regra com `description`") segue atendido. Acrescentei ao arquivo um bloco de comentário explicando a restrição e o motivo da forma por extenso, para que ninguém "conserte" o texto de volta e reproduza a falha. Nos comentários o `§` continua livre: comentário não chega na AWS.
+
+**Varredura de escopo.** Verifiquei todos os valores de `description` do stack, não só os 5 que quebraram: os `§` restantes estão exclusivamente em `variables.tf`, que são descrições de **variável do Terraform** — metadado local que nunca vai à API da AWS. Deliberadamente não alterados.
+
+### Validado
+
+| Critério | Evidência |
+| --- | --- |
+| `fmt -check -recursive` | limpo |
+| `validate` | `Success! The configuration is valid.` |
+| `tflint` raiz e módulo | exit 0 nos dois, com `ruleset.aws (0.48.0)` confirmado por `--version` **em cada diretório** antes de confiar no resultado (ADR-0002 A4) |
+| `checkov --var-file terraform.tfvars` | **43 passed, 0 failed, 7 skipped** (ADR-0002 A5) |
+| VPC | `10.0.0.0/24`; `EnableDnsSupport` e `EnableDnsHostnames` = `true` |
+| 4 subnets | `10.0.0.0/26` pub 1a · `10.0.0.64/26` pub 1b · `10.0.0.128/26` priv 1a · `10.0.0.192/26` priv 1b — CIDR e AZ exatos |
+| `map_public_ip_on_launch` | `true` nas 2 públicas, `false` nas 2 privadas |
+| RT pública | `0.0.0.0/0 → igw-0d7e60324d1822e50`, associada às 2 subnets públicas |
+| RTs privadas | 2, associadas 1:1 às privadas, **sem rota default** — estado base correto |
+| Gateway Endpoint S3 | 1, `available`, associado às 2 RTs privadas; **nenhum** Interface Endpoint |
+| EIC Endpoint | `create-complete` em `private-1a`, com `sg-eice` e `preserve_client_ip = false` (ADR-0002 A2) |
+| Default SG | sem nenhuma regra, ingress e egress vazios |
+| NACL default | ausente do state |
+| Tags | 7 em cada recurso tagueável: as 6 de `default_tags` mais `Name` |
+| Nada tarifado | `describe-nat-gateways`, `describe-addresses`, `describe-flow-logs`, `describe-log-groups --prefix /aws/vpc` e `describe-instances`: **todos vazios** |
+
+**Custo do estado resultante: US$ 0,00/hora.** VPC, subnets, route tables, IGW, security groups, Gateway Endpoint de S3 e EIC Endpoint não são recursos tarifados por hora.
+
+### Pendente
+
+1. 🔴 **As 5 regras de SG não foram aplicadas, e o `apply` está PARADO aguardando aprovação humana.** O plan corrigido é `5 to add, 0 to change, 0 to destroy`, exatamente os 5 endereços que falharam. Não apliquei por regra própria: o plan que a usuária revisou era `26 to add`, e o que existe agora é um plan cujo texto **eu** alterei depois da aprovação. Aplicar a própria edição não revisada é o que o gate existe para impedir. Não há urgência que justifique contornar — o estado parcial é gratuito, fechado e estável.
+2. 🟠 **O critério `terraform plan` retorna "No changes"** só pode ser fechado depois do apply dos 5. Hoje retorna `5 to add`.
+3. Pendentes herdados das etapas anteriores seguem abertos, inclusive o item 5 do handoff (P8/P9 com o professor).
+
+### Divergências
+
+1. 🔴 **O exemplo de código do ADR-0002 §5.2, linha 224, não é aplicável como está escrito.** A `description` prescrita — `"SSH para as instancias do laboratorio (ADR-0002 §5.2)"` — é rejeitada pela EC2 API por causa do `§`. Não é detalhe de estilo: é o que fez 5 de 26 recursos falharem num apply aprovado. **Ao Arquiteto:** corrigir a linha 224 do ADR-0002 e, de preferência, acrescentar ao §8 do ADR-0001 (Nomenclatura) uma regra explícita de que valor de `description` de recurso AWS é ASCII restrito ao conjunto da API, distinguindo-o de `description` de variável do Terraform, que é livre. O código já diverge do ADR neste ponto, deliberadamente e por impossibilidade técnica.
+
+As divergências abertas nas etapas anteriores seguem abertas.
+
+### Sugestões
+
+1. **Um gate de lint que rejeite não-ASCII em valor de `description` de recurso** fecharia esta classe inteira antes do apply. Nem `validate`, nem `tflint`, nem `checkov` pegaram — os três passaram limpos sobre o código quebrado, porque nenhum deles conhece a restrição de charset da EC2 API. O único detector foi a própria AWS, no meio da mutação. Note que o gate precisa distinguir `description` de recurso da de variável, senão dá falso positivo em `variables.tf`.
+2. Repetidas e ainda válidas: `.checkov.yaml` fixando `--var-file`, e wrapper encadeando os gates de validação.
+
+### Risco residual
+
+1. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção — e esta etapa mostrou o custo prático disso: a falha de charset foi descoberta em produção porque não existe lugar mais barato para descobri-la.
+2. 🟠 **Os 2 SGs existem sem nenhuma regra.** É fail-closed e seguro — o provider revogou o egress allow-all default, verificado na conta — mas o caminho de acesso do §7 passo 12 **não funciona** neste estado. Quem tentar a etapa 5d antes de aplicar os 5 vai falhar no SSH pelo EIC Endpoint.
+3. 🟠 **A proteção de custo do budget ainda não foi vista funcionar** (herdado da 5b).
+4. 🟡 **O apply parcial não deixou recurso órfão.** `terraform state list` traz 25 entradas — 21 recursos desta etapa, o budget importado na 5b e 3 data sources — e o plan seguinte acusa `0 to change, 0 to destroy`, o que prova que nada do que entrou ficou divergente do código. Não houve necessidade de manipular state.
+
+### Custo desta etapa
+
+**US$ 0,00.** Os 21 recursos criados são todos não tarifados por hora. Nenhuma chamada a `ce get-cost-and-usage`. Todas as verificações de conta foram `describe-*`, gratuitas.

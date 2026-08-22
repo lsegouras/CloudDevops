@@ -45,6 +45,19 @@ resource "aws_default_security_group" "this" {
 # endpoint destravaria metade do problema e o passo 12 falharia igual, agora no
 # `curl`/`docker pull` em vez de no SSH.
 #
+# ATENCAO — NAO USE `§` (NEM ACENTO, NEM EMOJI) EM `description` DE REGRA DE SG.
+# A EC2 API rejeita o caractere e o `apply` FALHA na criacao da regra, com
+# `InvalidParameterValue: Invalid rule description`. O conjunto aceito e fechado:
+# a-z, A-Z, 0-9, espaco e ._-:/()#,@[]+=&;{}!$* (AWS EC2 API, IpRange.description,
+# confirmado na documentacao em 2026-08-22). O `§` NAO esta nele.
+#
+# Medido na etapa 5c: as 5 regras abaixo nasceram com "(ADR-0002 §5.2)" — texto
+# copiado do exemplo de codigo do proprio ADR-0002 §5.2 — e as 5 falharam no
+# apply, enquanto os 21 demais recursos entraram. Os dois `aws_security_group`
+# passaram porque suas descricoes nunca tiveram `§`. Por isso a referencia ao ADR
+# aqui vai por extenso: "secao 5.2". Nos COMENTARIOS o `§` e livre — comentario
+# nao chega na AWS; a restricao vale so para o VALOR de `description`.
+#
 # REGRAS SEMPRE COMO RECURSO SEPARADO, NUNCA BLOCO `ingress`/`egress` INLINE.
 # Duas razoes independentes, ambas duras (ADR-0002 §8):
 #   1. O provider adverte formalmente contra misturar `aws_vpc_security_group_*_rule`
@@ -101,7 +114,7 @@ resource "aws_security_group" "lab_access" {
 resource "aws_vpc_security_group_egress_rule" "eice_ssh" {
   security_group_id = aws_security_group.eice.id
 
-  description                  = "SSH para as instancias do laboratorio (ADR-0002 §5.2)"
+  description                  = "SSH para as instancias do laboratorio (ADR-0002 secao 5.2)"
   referenced_security_group_id = aws_security_group.lab_access.id
   from_port                    = 22
   to_port                      = 22
@@ -142,7 +155,7 @@ resource "aws_vpc_security_group_ingress_rule" "lab_ssh" {
   #checkov:skip=CKV_AWS_24: falso positivo por forma de recurso nao modelada — o check le apenas `security_groups` e `source_security_group_id`, argumentos dos recursos LEGADOS, e desconhece `referenced_security_group_id`; sem origem nos campos que conhece, conclui "aberto ao mundo". Medido no fonte (AbsSecurityGroupUnrestrictedIngress.py, linhas 107-110) e em teste das tres variantes na porta 22: a referencia SG para SG falha e cidr_ipv4 = "10.0.0.0/24" passa — o check aprova a forma MAIS permissiva. A origem em SG e exigencia do ADR-0002 §5.2 e a troca por cidr_ipv4 esta vedada. Supressao autorizada nominalmente por ADR-0002 §5.3.
   security_group_id = aws_security_group.lab_access.id
 
-  description                  = "SSH vindo do EC2 Instance Connect Endpoint (ADR-0002 §5.2)"
+  description                  = "SSH vindo do EC2 Instance Connect Endpoint (ADR-0002 secao 5.2)"
   referenced_security_group_id = aws_security_group.eice.id
   from_port                    = 22
   to_port                      = 22
@@ -166,7 +179,7 @@ resource "aws_vpc_security_group_ingress_rule" "lab_ssh" {
 resource "aws_vpc_security_group_egress_rule" "lab_https" {
   security_group_id = aws_security_group.lab_access.id
 
-  description = "HTTPS para a API do ECR e para as camadas de imagem via endpoint de S3 (ADR-0002 §5.2)"
+  description = "HTTPS para a API do ECR e para as camadas de imagem via endpoint de S3 (ADR-0002 secao 5.2)"
   cidr_ipv4   = "0.0.0.0/0"
   from_port   = 443
   to_port     = 443
@@ -192,7 +205,7 @@ resource "aws_vpc_security_group_egress_rule" "lab_https" {
 resource "aws_vpc_security_group_egress_rule" "lab_dns_udp" {
   security_group_id = aws_security_group.lab_access.id
 
-  description = "DNS UDP para o resolver da VPC (ADR-0002 §5.2, premissa P2)"
+  description = "DNS UDP para o resolver da VPC (ADR-0002 secao 5.2, premissa P2)"
   cidr_ipv4   = aws_vpc.this.cidr_block
   from_port   = 53
   to_port     = 53
@@ -206,7 +219,7 @@ resource "aws_vpc_security_group_egress_rule" "lab_dns_udp" {
 resource "aws_vpc_security_group_egress_rule" "lab_dns_tcp" {
   security_group_id = aws_security_group.lab_access.id
 
-  description = "DNS TCP para o resolver da VPC, respostas acima de 512 bytes (ADR-0002 §5.2, premissa P2)"
+  description = "DNS TCP para o resolver da VPC, respostas acima de 512 bytes (ADR-0002 secao 5.2, premissa P2)"
   cidr_ipv4   = aws_vpc.this.cidr_block
   from_port   = 53
   to_port     = 53
