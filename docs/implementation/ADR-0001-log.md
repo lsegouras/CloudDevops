@@ -777,3 +777,175 @@ As divergências abertas nas etapas anteriores seguem abertas. Cinco novas:
 3. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção. Repetido de todas as etapas anteriores porque continua valendo.
 4. 🟠 **Os critérios A8 e A9 seguem inteiramente não verificados contra a AWS.** O código está verde em `validate`, `tflint` e `checkov`, mas nenhum deles conta recurso de `plan`. A afirmação "o estado base cria zero recursos tarifados" continua sendo leitura de código, não medição — e só o `plan` a converte em evidência.
 5. 🟠 **O budget entrou em produção sem nunca ter passado por `plan`.** Foi criado por chamada de API direta, com os valores transcritos à mão do código para o JSON da CLI. Conferi campo a campo com `describe-budget`, mas a transcrição não teve gate automático nenhum; um erro de digitação no filtro de tag teria produzido exatamente o mesmo `HEALTHY`.
+
+---
+
+## 2026-08-22 — Etapa 5b: `import` do budget e os três `plan` (critérios A8 e A9)
+
+Continuação direta da 5a. Três bloqueios da etapa anterior foram removidos antes desta sessão começar: a sessão do profile `app_cloud_devops` foi renovada, o `terraform init -reconfigure` com backend S3 passou, e a Cost Allocation Tag `CostCenter` foi ativada.
+
+### Pré-flight
+
+| MCP | Chamada real | Resultado |
+| --- | --- | --- |
+| `terraform` | `get_latest_provider_version(hashicorp/aws)` | `6.61.0` |
+| `aws-mcp` | `sts get-caller-identity` | `arn:aws:iam::090413359726:user/lauraclouddevops` |
+
+Ambos no ar. **Isto encerra a "fonte substituta declarada" registrada em §16 do ADR** — naquela sessão o MCP `terraform` não existia e o Arquiteto anotou a substituição por transparência. Nesta ele responde, e a versão publicada do provider avançou de `6.58.0` (registrada em §16) para `6.61.0`. O pin `~> 6.58` continua correto e o `.terraform.lock.hcl` mantém a stack em **6.59.0** — nada a fazer, registrado só para que a diferença não seja lida como deriva.
+
+Ambiente: Terraform **1.15.8** (satisfaz `~> 1.13`), provider `hashicorp/aws` **6.59.0** vindo do lock.
+
+### Feito
+
+**1. `terraform import` do budget — executado, com autorização humana explícita.**
+
+```
+terraform import aws_budgets_budget.this 090413359726:dvn-workshop-budget-curso
+→ Import successful!
+```
+
+Este era o item 1 de *Divergências* e o item 1 de *Risco residual* da etapa 5a: o budget existia na AWS mas não em state, e o primeiro `apply` falharia com `DuplicateRecordException`. Antes do import confirmei por `budgets:describe-budget` que o recurso estava lá com os valores esperados (`5.0 USD`, `ANNUALLY`, período 2026-08-01 → 2026-12-03, filtro `TagKeyValue`, `HealthStatus: HEALTHY`).
+
+State depois do import — quatro entradas, nenhuma delas de rede:
+
+```
+aws_budgets_budget.this
+module.network.data.aws_caller_identity.current
+module.network.data.aws_partition.current
+module.network.data.aws_region.current
+```
+
+**2. Os três `plan`, salvos em `docs/implementation/plans/`.**
+
+| Arquivo | Comando |
+| --- | --- |
+| `ADR-0001-plan-base.txt` | `terraform plan` |
+| `ADR-0001-plan-nat.txt` | `terraform plan -var="enable_nat_gateway=true"` |
+| `ADR-0001-plan-flowlogs.txt` | `terraform plan -var="enable_flow_logs=true"` |
+
+### Validado
+
+**O import não gerou diff.** É a verificação que dá sentido ao import: se os valores criados à mão na etapa 5a divergissem do código, o plan mostraria `~ update`. No plan base o budget aparece **uma única vez**, e como refresh:
+
+```
+aws_budgets_budget.this: Refreshing state... [id=090413359726:dvn-workshop-budget-curso]
+```
+
+Não há bloco `~ aws_budgets_budget.this`. Os três plans fecham em **`0 to change, 0 to destroy`**, e uma busca por `must be replaced`, `will be destroyed` e `will be updated` nos três arquivos retorna **vazio**. Isto encerra o item 5 de *Risco residual* da 5a — a transcrição manual campo a campo para o JSON da CLI está agora conferida por uma ferramenta, não por leitura minha.
+
+**Critério A8 — `plan` sem variáveis não cria nenhum recurso tarifado. ATENDIDO.**
+
+```
+Plan: 26 to add, 0 to change, 0 to destroy.
+```
+
+Os 26, na íntegra:
+
+| # | Recurso | Custo |
+| --- | --- | --- |
+| 1 | `module.network.aws_vpc.this` | US$ 0,00 |
+| 2 | `module.network.aws_internet_gateway.this` | US$ 0,00 |
+| 3–4 | `aws_subnet.public[0]`, `aws_subnet.public[1]` | US$ 0,00 |
+| 5–6 | `aws_subnet.private[0]`, `aws_subnet.private[1]` | US$ 0,00 |
+| 7 | `aws_route_table.public` | US$ 0,00 |
+| 8–9 | `aws_route_table.private[0]`, `aws_route_table.private[1]` | US$ 0,00 |
+| 10 | `aws_route.public` (`0.0.0.0/0 → igw`) | US$ 0,00 |
+| 11–12 | `aws_route_table_association.public[0]`, `[1]` | US$ 0,00 |
+| 13–14 | `aws_route_table_association.private[0]`, `[1]` | US$ 0,00 |
+| 15 | `aws_vpc_endpoint.s3` — `vpc_endpoint_type = "Gateway"` | US$ 0,00 |
+| 16–17 | `aws_vpc_endpoint_route_table_association.s3_private[0]`, `[1]` | US$ 0,00 |
+| 18 | `aws_ec2_instance_connect_endpoint.this` | US$ 0,00 |
+| 19 | `aws_default_security_group.this` | US$ 0,00 |
+| 20 | `aws_security_group.eice` (ADR-0002) | US$ 0,00 |
+| 21 | `aws_security_group.lab_access` (ADR-0002) | US$ 0,00 |
+| 22 | `aws_vpc_security_group_egress_rule.eice_ssh` | US$ 0,00 |
+| 23–24 | `aws_vpc_security_group_egress_rule.lab_dns_tcp`, `lab_dns_udp` | US$ 0,00 |
+| 25 | `aws_vpc_security_group_egress_rule.lab_https` | US$ 0,00 |
+| 26 | `aws_vpc_security_group_ingress_rule.lab_ssh` | US$ 0,00 |
+
+Nenhum `aws_nat_gateway`, nenhum `aws_eip`, nenhum `aws_cloudwatch_log_group`, nenhum `aws_iam_role`, nenhum `aws_flow_log`. Confirmado também que `aws_vpc_endpoint.s3` é do tipo **Gateway** — o tipo é o que separa US$ 0,00 de US$ 0,01/h por AZ, e o plan mostra `vpc_endpoint_type = "Gateway"` literalmente.
+
+**Nota sobre a contagem.** §6 do ADR previa ~10 recursos e o plan traz 26. A diferença não é escopo extra: são as 2 route table associations públicas, as 2 privadas, as 2 do endpoint S3, e sobretudo os **7 recursos de Security Group do ADR-0002** (2 SGs + 5 regras), que emenda este ADR. §4 conta "recursos" em granularidade de componente; o Terraform conta em granularidade de recurso. Nenhum recurso fora dos dois ADRs aparece no plan.
+
+Evidências de §14 "Infraestrutura" colhidas do mesmo plan, agora contra a máquina e não contra o código:
+
+| Critério | Valor no plan |
+| --- | --- |
+| VPC `10.0.0.0/24` com DNS | `cidr_block = "10.0.0.0/24"`, `enable_dns_support = true`, `enable_dns_hostnames = true` |
+| `public-1a` | `10.0.0.0/26`, `us-east-1a`, `map_public_ip_on_launch = true` |
+| `public-1b` | `10.0.0.64/26`, `us-east-1b`, `map_public_ip_on_launch = true` |
+| `private-1a` | `10.0.0.128/26`, `us-east-1a`, `map_public_ip_on_launch = false` |
+| `private-1b` | `10.0.0.192/26`, `us-east-1b`, `map_public_ip_on_launch = false` |
+| NACL default ausente do state (R5) | busca por `aws_default_network_acl` nos 3 plans: **vazio** |
+| RTs privadas sem rota default no estado base | `aws_route.private[*]` **não** aparece no plan base |
+| Outputs | `nat_gateway_id = ""` e `nat_public_ip = ""`; `availability_zones = ["us-east-1a","us-east-1b"]` |
+
+**Critério A9 — `-var="enable_nat_gateway=true"` cria exatamente 4. ATENDIDO.**
+
+```
+Plan: 30 to add, 0 to change, 0 to destroy.
+```
+
+30 − 26 = **4**, obtidos por diff da lista de recursos contra o plan base:
+
+1. `module.network.aws_eip.nat[0]`
+2. `module.network.aws_nat_gateway.this[0]`
+3. `module.network.aws_route.private[0]`
+4. `module.network.aws_route.private[1]`
+
+Exatamente os quatro que §14 nomeia. O diff inverso (recursos que sumiriam) é **vazio**: ligar o NAT só acrescenta. Confirma o ponto de atenção 1 de §15 — `enable_nat_gateway` condiciona três coisas (EIP, NAT e as duas rotas), e o EIP está sob a mesma variável, que é a mitigação de R6.
+
+**Terceiro plan — `-var="enable_flow_logs=true"` cria exatamente 4. ATENDIDO.**
+
+```
+Plan: 30 to add, 0 to change, 0 to destroy.
+```
+
+30 − 26 = **4**:
+
+1. `module.network.aws_cloudwatch_log_group.this[0]`
+2. `module.network.aws_iam_role.this[0]`
+3. `module.network.aws_iam_role_policy.this[0]`
+4. `module.network.aws_flow_log.this[0]`
+
+Exatamente os quatro de §14. O diff bruto de linhas `#` mostra 32 contra 26, não 30 contra 26 — as duas linhas a mais são `module.network.data.aws_iam_policy_document.this[0] will be read during apply` e sua linha de continuação `(config refers to values not yet known)`. **Data source não é recurso criado, não entra no `to add` e não custa nada**; o `Plan:` do próprio Terraform é a contagem que vale, e ela diz 30. Registro a discrepância porque quem contar linhas `#` a olho vai achar 6 e concluir que o critério falhou.
+
+**Cost Allocation Tag `CostCenter` — ATIVA.** Verificada por leitura própria, não por relato:
+
+```
+aws ce list-cost-allocation-tags --tag-keys CostCenter
+→ {"TagKey":"CostCenter","Type":"UserDefined","Status":"Active","LastUpdatedDate":"2026-08-22T15:07:37Z"}
+```
+
+Encerra o pendente 4 da etapa 5a. Metade do item 2 de *Risco residual* da 5a cai com isso; a outra metade — a assinatura de e-mail — virou uma divergência, abaixo.
+
+### Pendente
+
+1. 🔴 **`terraform apply` do estado base (§7 passo 9) — não autorizado nesta invocação.** É o próximo passo e precisa de aprovação humana sobre as contagens acima. O plan está revisado e as três contagens batem com §14; falta a decisão.
+2. 🟠 **Critério "um segundo `plan` logo após o `apply` retorna *No changes*"** — só verificável depois do apply.
+3. 🟠 **Toda a "Validação funcional" de §14** (§7 passos 11–15: instância descartável em `private-1b`, EIC Endpoint, `docker pull`, Logs Insights, fechamento da janela e custo real) — depende do apply. Nenhuma instância EC2 foi criada nesta etapa, conforme instrução.
+4. 🟠 **Assinatura de e-mail do budget** — ver *Divergências* 1. Mudou de natureza: não é mais "confirmar no e-mail", é "descobrir se há o que confirmar".
+5. 🟡 Pré-requisitos 2 e 6 do handoff (P8/P9 com o professor; datas reais do curso) seguem abertos desde a etapa 1. O budget opera com as datas assumidas.
+
+### Divergências
+
+As divergências abertas nas etapas anteriores seguem abertas, **exceto a nº 1 da etapa 5a** (budget fora do state), que o import desta etapa resolve na prática. A recomendação daquele item continua valendo para o Arquiteto: §7 deveria dizer que o passo 1 é out-of-band e incluir o import como passo explícito, senão a próxima pessoa que executar este ADR do zero repete o mesmo tropeço. Uma divergência nova:
+
+1. 🟠 **O pendente 3 da etapa 5a — "assinatura SNS do budget em `PendingConfirmation`" — não se sustenta na observação.** `aws sns list-subscriptions` na conta retorna `{"Subscriptions":[]}`: **nenhuma** assinatura, em nenhum estado. Na etapa 5a assumi que a AWS criaria uma assinatura SNS visível por trás de `subscriber_email_addresses` e a registrei como pendente a confirmar. A conta não mostra isso. A leitura mais provável é que subscriber do tipo `EMAIL` em AWS Budgets é entregue por mecanismo interno da AWS, sem tópico SNS na conta do cliente — o fluxo de confirmação por SNS valeria para subscriber do tipo `SNS`, que não é o nosso caso. ⚠️ **NÃO VERIFICADO:** não confirmei isso na documentação e, principalmente, **não tenho prova de que o e-mail chega** — a única prova seria um alerta real disparando. Corrijo aqui o que afirmei na 5a, em vez de deixar um pendente que aponta para algo inexistente. **Ao Arquiteto:** o critério de §14 pede assinatura de e-mail "confirmada"; se não há o que confirmar, o critério precisa virar outra coisa — sugiro "alerta de teste recebido" ou a remoção do requisito com justificativa.
+
+### Sugestões
+
+1. **§16 do ADR merece uma nota de que o MCP `terraform` voltou.** A seção declara a fonte substituta com um aviso forte e permanente; agora que o MCP responde, os quatro itens de Terraform listados ali podem ser reverificados e o aviso retirado. Não fiz porque `docs/adr/` é somente leitura para mim.
+2. **Salvar os plans em `docs/implementation/plans/` deveria virar convenção.** Criei o diretório nesta etapa porque §7 passo 16 pede "plan salvo" no PR e não havia lugar definido. Vale registrar em §8 se o Arquiteto concordar.
+3. Repetidas e ainda válidas: `.checkov.yaml` fixando `--var-file`/`--skip-path`, hook de ASCII em comentário `.tf`, e wrapper encadeando os gates de validação.
+
+### Risco residual
+
+1. 🔴 **Não há ambiente de validação anterior ao alvo.** O ADR define um único ambiente, `prd`. Toda aplicação nesta stack é aplicação em produção. Repetido de todas as etapas anteriores porque continua valendo, e é o que torna a aprovação do próximo `apply` uma decisão de produção.
+2. 🟠 **A proteção de custo do budget ainda não foi vista funcionar.** A tag está ativa e o filtro agora casa, mas `CalculatedSpend.ActualSpend` segue `0.0` e os dados de Budgets levam de 8 a 12 h para refletir (§11.5). Só o primeiro ciclo com gasto real prova que a corrente inteira — tag aplicada → tag ativada → filtro → notificação → e-mail — está fechada. Até lá é presunção razoável, não evidência.
+3. 🟠 **O bucket de state continua fora do Terraform**, por decisão de §8. Correto, e registrado para que a assimetria com o budget não confunda: o budget entrou no state nesta etapa, o bucket não entra por design.
+4. 🟡 **As contagens valem para este código nesta data.** Qualquer alteração no módulo muda os números, e os três plans precisam ser refeitos antes do apply se houver commit no meio. O apply deve reconfirmar que o plan bate com o que foi aprovado.
+
+### Custo desta etapa
+
+**US$ 0,00.** O `import` não cria recurso. Os três `plan` são leitura. Todas as chamadas de AWS foram `sts get-caller-identity`, `budgets describe-budget`, `ce list-cost-allocation-tags` e `sns list-subscriptions` — todas gratuitas. **Nenhuma chamada a `ce get-cost-and-usage`** (US$ 0,01 cada); `list-cost-allocation-tags` pertence ao namespace `ce` mas não é operação tarifada do Cost Explorer, que cobra por requisição de `GetCostAndUsage` e afins.
